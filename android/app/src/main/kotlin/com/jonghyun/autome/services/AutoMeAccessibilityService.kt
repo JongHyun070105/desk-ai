@@ -1,8 +1,8 @@
 package com.jonghyun.autome.services
 
 import android.accessibilityservice.AccessibilityService
-import android.view.accessibility.AccessibilityEvent
 import android.util.Log
+import android.view.accessibility.AccessibilityEvent
 import com.jonghyun.autome.data.AppDatabase
 import com.jonghyun.autome.data.MessageEntity
 import com.jonghyun.autome.utils.PiiMasker
@@ -11,35 +11,32 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class AutoMeAccessibilityService : AccessibilityService() {
-    companion object {
-        private const val TAG = "AutoMeAI_Accessibility"
-    }
+    private val scope = CoroutineScope(Dispatchers.IO)
+    private val TAG = "AutoMeCaptured"
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-        
-        // 발신(Sent) 입력 감지 (간단한 Fallback 로직, 추후 고도화 필요)
-        if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-            val node = event.source ?: return
-            val text = node.text?.toString()
-            if (!text.isNullOrBlank()) {
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+            val text = event.text.toString()
+            if (text.isNotEmpty() && text != "[]") {
+                Log.d(TAG, "Captured Sent Message: $text")
                 saveSentMessage(text)
             }
         }
     }
 
-    private fun saveSentMessage(originalText: String) {
-        val maskedText = PiiMasker.maskText(originalText)
-        val entity = MessageEntity(
-            roomId = "unknown_room_from_accessibility",
-            sender = "Me",
-            message = maskedText,
-            timestamp = System.currentTimeMillis(),
-            isSentByMe = true
-        )
-        CoroutineScope(Dispatchers.IO).launch {
-            AppDatabase.getDatabase(applicationContext).messageDao().insertMessage(entity)
-            Log.d(TAG, "Saved sent masked message")
+    private fun saveSentMessage(text: String) {
+        val maskedText = PiiMasker.maskText(text)
+        scope.launch {
+            val db = AppDatabase.getDatabase(applicationContext)
+            val message = MessageEntity(
+                roomId = "accessibility_sent",
+                sender = "나 (보냄)",
+                message = maskedText,
+                timestamp = System.currentTimeMillis(),
+                isSentByMe = true
+            )
+            db.messageDao().insertMessage(message)
+            Log.d(TAG, "Sent message saved to DB: $maskedText")
         }
     }
 

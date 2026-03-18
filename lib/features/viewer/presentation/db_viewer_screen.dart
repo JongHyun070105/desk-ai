@@ -10,6 +10,8 @@ class DbViewerScreen extends StatefulWidget {
 
 class _DbViewerScreenState extends State<DbViewerScreen> {
   int _messageCount = 0;
+  List<Map<String, dynamic>> _messages = [];
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -18,39 +20,73 @@ class _DbViewerScreenState extends State<DbViewerScreen> {
   }
 
   Future<void> _loadData() async {
-    final count = await NativeBridge.getMessageCount();
-    setState(() {
-      _messageCount = count;
-    });
+    setState(() => _isLoading = true);
+    try {
+      final count = await NativeBridge.getMessageCount();
+      final messages = await NativeBridge.getLatestMessages();
+      setState(() {
+        _messageCount = count;
+        _messages = messages;
+      });
+    } finally {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('로컬 DB 뷰어')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.storage, size: 64, color: Colors.blueGrey),
-            const SizedBox(height: 16),
-            const Text(
-              'ROOM DB 수집 통계',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '총 학습된 메시지 수: $_messageCount 개',
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: _loadData,
-              child: const Text('새로고침'),
-            )
-          ],
-        ),
+      appBar: AppBar(
+        title: const Text('로컬 DB 뷰어'),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
+        ],
       ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: Colors.blueGrey.shade50,
+                  width: double.infinity,
+                  child: Text(
+                    '총 학습된 메시지: $_messageCount개 (최신 50개 표시)',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Expanded(
+                  child: _messages.isEmpty
+                      ? const Center(child: Text('수집된 데이터가 없습니다.'))
+                      : ListView.separated(
+                          itemCount: _messages.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final msg = _messages[index];
+                            final isSentByMe = msg['isSentByMe'] ?? false;
+                            return ListTile(
+                              leading: Icon(
+                                isSentByMe ? Icons.arrow_upward : Icons.arrow_downward,
+                                color: isSentByMe ? Colors.blue : Colors.green,
+                              ),
+                              title: Text(msg['sender'] ?? 'Unknown'),
+                              subtitle: Text(msg['message'] ?? ''),
+                              trailing: Text(
+                                _formatTime(msg['timestamp']),
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
     );
+  }
+
+  String _formatTime(dynamic timestamp) {
+    if (timestamp == null) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch(timestamp as int);
+    return '${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }

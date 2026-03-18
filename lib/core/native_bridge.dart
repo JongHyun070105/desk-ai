@@ -43,4 +43,15 @@ class NativeBridge {
       return 0;
     }
   }
+
+  /// (테스트용) 최신 수집된 메시지 목록 조회
+  static Future<List<Map<String, dynamic>>> getLatestMessages() async {
+    try {
+      final List<dynamic> result = await _channel.invokeMethod('getLatestMessages');
+      return result.map((e) => Map<String, dynamic>.from(e)).toList();
+    } on PlatformException catch (e) {
+      debugPrint('NativeBridge Error (getLatestMessages): $e');
+      return [];
+    }
+  }
 }

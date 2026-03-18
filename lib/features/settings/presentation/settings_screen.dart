@@ -3,20 +3,60 @@ import '../../../core/native_bridge.dart';
 import '../../fallback/presentation/txt_import_screen.dart';
 import '../../viewer/presentation/db_viewer_screen.dart';
 
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _isServiceEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkStatus();
+  }
+
+  Future<void> _checkStatus() async {
+    final enabled = await NativeBridge.checkServicesEnabled();
+    setState(() {
+      _isServiceEnabled = enabled;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Auto-Me 설정'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _checkStatus,
+          )
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16.0),
         children: [
+          Card(
+            color: _isServiceEnabled ? Colors.green.shade50 : Colors.orange.shade50,
+            child: ListTile(
+              leading: Icon(
+                _isServiceEnabled ? Icons.check_circle : Icons.warning,
+                color: _isServiceEnabled ? Colors.green : Colors.orange,
+              ),
+              title: Text(_isServiceEnabled ? '서비스 활성화됨' : '서비스 설정 필요'),
+              subtitle: Text(_isServiceEnabled
+                  ? '백그라운드에서 대화를 학습 중입니다.'
+                  : '접근성 및 알림 권한을 허용해주세요.'),
+            ),
+          ),
+          const SizedBox(height: 16),
           const Text(
-            '접근성 권한 및 알림 접근 권한',
+            '권한 설정',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
