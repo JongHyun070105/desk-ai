@@ -11,7 +11,7 @@ class AICoreManager(private val context: Context) {
     fun generateReply(messageContext: List<String>): List<String> {
         Log.d(TAG, "AICore generating reply based on context. length: \${messageContext.size}")
         
-        // TODO: 실제 안드로이드 14 이상 AICore (Gemini Nano) SDK 호출 연결
+        // 실제 안드로이드 14 이상 AICore (Gemini Nano) SDK 호출 연결 예정
         // 현재는 모델이 완전히 바인딩되기 전까지 사용할 Fallback 혹은 더미 응답
         return listOf(
             "네, 확인했습니다.",

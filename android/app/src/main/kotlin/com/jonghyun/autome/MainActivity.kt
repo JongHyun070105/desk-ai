@@ -38,56 +38,71 @@ class MainActivity : FlutterActivity() {
                 val inputStream = contentResolver.openInputStream(uri)
                 val reader = inputStream?.bufferedReader()
                 val content = reader?.readText() ?: ""
-                
-                // 한 줄씩 파싱하여 다중 라인 메시지 지원
-                val dateRegex = Regex("-+ (\\d{4})년 (\\d{1,2})월 (\\d{1,2})일 .+ -+")
-                val messageRegex = Regex("^\\[(.+?)\\] \\[(.+?)\\] (.+)$")
-                
-                val messages = mutableListOf<MessageEntity>()
-                var currentSender = ""
-                var currentMessage = StringBuilder()
-                var currentTimestamp = System.currentTimeMillis() - 100000000 // 과거 시간 부여
-                
-                content.lines().forEach { line ->
-                    if (dateRegex.matches(line)) return@forEach
-                    
-                    val match = messageRegex.find(line)
-                    if (match != null) {
-                        if (currentSender.isNotEmpty()) {
-                            messages.add(MessageEntity(
-                                roomId = "shared_file_import",
-                                sender = currentSender,
-                                message = currentMessage.toString().trimEnd(),
-                                timestamp = currentTimestamp++,
-                                isSentByMe = currentSender == "나" || currentSender == "회원님"
-                            ))
-                            currentMessage.clear()
-                        }
-                        currentSender = match.groupValues[1]
-                        currentMessage.append(match.groupValues[3])
-                    } else if (line.trim().isNotEmpty() && currentSender.isNotEmpty()) {
-                        currentMessage.append("\n").append(line)
-                    }
-                }
-                
-                if (currentSender.isNotEmpty() && currentMessage.isNotEmpty()) {
-                    messages.add(MessageEntity(
-                        roomId = "shared_file_import",
-                        sender = currentSender,
-                        message = currentMessage.toString().trimEnd(),
-                        timestamp = currentTimestamp,
-                        isSentByMe = currentSender == "나" || currentSender == "회원님"
-                    ))
-                }
-                
-                if (messages.isNotEmpty()) {
-                    val db = AppDatabase.getDatabase(applicationContext)
-                    db.messageDao().insertMessages(messages)
-                    android.util.Log.d("AutoMeCaptured", "Shared File Imported: ${messages.size} msgs")
-                }
+                parseAndInsertChatLog(content, "shared_file_import")
             } catch (e: Exception) {
                 android.util.Log.e("AutoMeCaptured", "Failed to process shared file: $e")
             }
+        }
+    }
+
+    private fun processLocalFile(filePath: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val file = java.io.File(filePath)
+                val content = file.readText()
+                parseAndInsertChatLog(content, "local_file_import")
+            } catch (e: Exception) {
+                android.util.Log.e("AutoMeCaptured", "Failed to process local file: $e")
+            }
+        }
+    }
+
+    private suspend fun parseAndInsertChatLog(content: String, source: String) {
+        // 한 줄씩 파싱하여 다중 라인 메시지 지원
+        val dateRegex = Regex("-+ (\\d{4})년 (\\d{1,2})월 (\\d{1,2})일 .+ -+")
+        val messageRegex = Regex("^\\[(.+?)\\] \\[(.+?)\\] (.+)$")
+        
+        val messages = mutableListOf<MessageEntity>()
+        var currentSender = ""
+        var currentMessage = StringBuilder()
+        var currentTimestamp = System.currentTimeMillis() - 100000000 // 과거 시간 부여
+        
+        content.lines().forEach { line ->
+            if (dateRegex.matches(line)) return@forEach
+            
+            val match = messageRegex.find(line)
+            if (match != null) {
+                if (currentSender.isNotEmpty()) {
+                    messages.add(MessageEntity(
+                        roomId = source,
+                        sender = currentSender,
+                        message = currentMessage.toString().trimEnd(),
+                        timestamp = currentTimestamp++,
+                        isSentByMe = currentSender == "나" || currentSender == "회원님"
+                    ))
+                    currentMessage.clear()
+                }
+                currentSender = match.groupValues[1]
+                currentMessage.append(match.groupValues[3])
+            } else if (line.trim().isNotEmpty() && currentSender.isNotEmpty()) {
+                currentMessage.append("\n").append(line)
+            }
+        }
+        
+        if (currentSender.isNotEmpty() && currentMessage.isNotEmpty()) {
+            messages.add(MessageEntity(
+                roomId = source,
+                sender = currentSender,
+                message = currentMessage.toString().trimEnd(),
+                timestamp = currentTimestamp,
+                isSentByMe = currentSender == "나" || currentSender == "회원님"
+            ))
+        }
+        
+        if (messages.isNotEmpty()) {
+            val db = AppDatabase.getDatabase(applicationContext)
+            db.messageDao().insertMessages(messages)
+            android.util.Log.d("AutoMeCaptured", "Chat Log Imported: ${messages.size} msgs from $source")
         }
     }
 
@@ -103,6 +118,15 @@ class MainActivity : FlutterActivity() {
                 "openNotificationSettings" -> {
                     startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     result.success(null)
+                }
+                "processFile" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath != null) {
+                        processLocalFile(filePath)
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_ARGUMENT", "filePath is required", null)
+                    }
                 }
                 "checkServicesEnabled" -> {
                     val accessibilityEnabled = isAccessibilityServiceEnabled()
