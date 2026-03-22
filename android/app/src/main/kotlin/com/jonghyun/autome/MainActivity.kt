@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.jonghyun.autome.data.AppDatabase
 import com.jonghyun.autome.data.MessageEntity
+import com.jonghyun.autome.utils.PiiMasker
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.jonghyun.autome/native"
@@ -76,7 +77,7 @@ class MainActivity : FlutterActivity() {
                     messages.add(MessageEntity(
                         roomId = source,
                         sender = currentSender,
-                        message = currentMessage.toString().trimEnd(),
+                        message = PiiMasker.maskText(currentMessage.toString().trimEnd()),
                         timestamp = currentTimestamp++,
                         isSentByMe = currentSender == "나" || currentSender == "회원님"
                     ))
@@ -93,7 +94,7 @@ class MainActivity : FlutterActivity() {
             messages.add(MessageEntity(
                 roomId = source,
                 sender = currentSender,
-                message = currentMessage.toString().trimEnd(),
+                message = PiiMasker.maskText(currentMessage.toString().trimEnd()),
                 timestamp = currentTimestamp,
                 isSentByMe = currentSender == "나" || currentSender == "회원님"
             ))

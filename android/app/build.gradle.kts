@@ -52,4 +52,12 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // ML Kit GenAI - Gemini Nano On-Device AI
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta1")
+
+    // ML Kit GenAI 의존성
+    implementation("androidx.concurrent:concurrent-futures:1.3.0")
+    implementation("com.google.guava:guava:32.0.1-jre")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3")
 }

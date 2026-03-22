@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#F0F0F0"
+    android:elevation="8dp"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/tvFloatingTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Auto-Me 답변 추천"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="#333333"
+        android:paddingBottom="8dp" />
+
+    <!-- 수락 페르소나 -->
+    <Button
+        android:id="@+id/btnReply1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="수락"
+        android:textSize="13sp"
+        android:layout_marginBottom="4dp"
+        android:backgroundTint="#4CAF50" />
+
+    <!-- 거절 페르소나 -->
+    <Button
+        android:id="@+id/btnReply2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="거절"
+        android:textSize="13sp"
+        android:layout_marginBottom="4dp"
+        android:backgroundTint="#FF5252" />
+
+    <!-- 모호함 페르소나 -->
+    <Button
+        android:id="@+id/btnReply3"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="모호함"
+        android:textSize="13sp"
+        android:layout_marginBottom="8dp"
+        android:backgroundTint="#FF9800" />
+
+    <!-- 닫기 버튼 -->
+    <Button
+        android:id="@+id/btnClose"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="닫기"
+        android:textSize="12sp"
+        android:backgroundTint="#9E9E9E" />
+
+</LinearLayout>
