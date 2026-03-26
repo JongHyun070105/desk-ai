@@ -1,69 +1,99 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:background="@drawable/bg_floating_rounded"
-    android:elevation="12dp"
-    android:padding="20dp"
-    android:layout_margin="16dp">
+    android:background="@drawable/bg_floating_glass"
+    android:elevation="16dp"
+    android:padding="16dp"
+    android:layout_margin="12dp">
+
+    <!-- Top Drag Handle -->
+    <View
+        android:id="@+id/dragHandle"
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="12dp"
+        android:background="#D1D1D1"
+        android:backgroundTint="#D1D1D1"
+        android:alpha="0.6" />
+
+    <!-- Close Button (X) -->
+    <ImageButton
+        android:id="@+id/btnClose"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_alignParentEnd="true"
+        android:layout_marginTop="4dp"
+        android:background="@android:color/transparent"
+        android:src="@android:drawable/ic_menu_close_clear_cancel"
+        android:contentDescription="Close"
+        android:tint="#888888" />
 
     <TextView
         android:id="@+id/tvFloatingTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Auto-Me 답변 추천"
-        android:textSize="16sp"
+        android:layout_below="@id/dragHandle"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="4dp"
+        android:text="답장 추천"
+        android:textSize="17sp"
         android:textStyle="bold"
-        android:textColor="#222222"
-        android:paddingBottom="16dp" />
+        android:textColor="#1A1A1A"
+        android:letterSpacing="-0.02" />
 
     <LinearLayout
+        android:id="@+id/replyContainer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_below="@id/tvFloatingTitle"
+        android:layout_marginTop="16dp"
         android:orientation="vertical">
 
         <Button
             android:id="@+id/btnReply1"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="수락"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
+            android:layout_height="52dp"
             android:layout_marginBottom="8dp"
-            android:backgroundTint="#4CAF50"
+            android:background="@drawable/bg_reply_chip"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="답변 후보 1"
+            android:textAlignment="viewStart"
+            android:textAllCaps="false"
+            android:textColor="#333333"
+            android:textSize="15sp"
             android:stateListAnimator="@null" />
 
         <Button
             android:id="@+id/btnReply2"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="거절"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
+            android:layout_height="52dp"
             android:layout_marginBottom="8dp"
-            android:backgroundTint="#FF5252"
+            android:background="@drawable/bg_reply_chip"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="답변 후보 2"
+            android:textAlignment="viewStart"
+            android:textAllCaps="false"
+            android:textColor="#333333"
+            android:textSize="15sp"
             android:stateListAnimator="@null" />
 
         <Button
             android:id="@+id/btnReply3"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:text="모호함"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:layout_marginBottom="12dp"
-            android:backgroundTint="#FF9800"
-            android:stateListAnimator="@null" />
-
-        <Button
-            android:id="@+id/btnClose"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:text="닫기"
-            android:textSize="13sp"
+            android:layout_height="52dp"
+            android:background="@drawable/bg_reply_chip"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="답변 후보 3"
+            android:textAlignment="viewStart"
+            android:textAllCaps="false"
             android:textColor="#333333"
-            android:backgroundTint="#E0E0E0"
+            android:textSize="15sp"
             android:stateListAnimator="@null" />
     </LinearLayout>
-</LinearLayout>
+</RelativeLayout>
+

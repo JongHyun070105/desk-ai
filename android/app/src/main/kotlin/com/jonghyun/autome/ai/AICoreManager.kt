@@ -5,57 +5,76 @@ import android.util.Log
 import com.jonghyun.autome.data.AppDatabase
 import com.jonghyun.autome.data.MessageEntity
 import com.jonghyun.autome.utils.PiiMasker
-import com.google.mlkit.genai.common.DownloadCallback
 import com.google.mlkit.genai.common.DownloadStatus
-import com.google.mlkit.genai.common.GenAiException
-import com.google.mlkit.genai.prompt.GenerativeModel
-import com.google.mlkit.genai.prompt.Generation
-import com.google.mlkit.genai.prompt.TextPart
-import com.google.mlkit.genai.prompt.PromptPrefix
-import com.google.mlkit.genai.prompt.generateContentRequest
+import com.google.mlkit.genai.prompt.GenerativeModel as NanoModel
+import com.google.mlkit.genai.prompt.Generation as NanoGeneration
+import com.google.mlkit.genai.prompt.TextPart as NanoTextPart
+import com.google.mlkit.genai.prompt.generateContentRequest as nanoRequest
+import com.google.ai.client.generativeai.GenerativeModel as CloudModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Properties
 
 /**
- * AICoreManager: ML Kit GenAI Prompt API 기반 On-Device AI 답변 생성 매니저
+ * AICoreManager: ML Kit GenAI (Hybrid) 기반 답변 생성 매니저
  *
- * Google ML Kit GenAI Prompt API (Gemini Nano)를 사용하여 온디바이스에서 답변을 생성합니다.
- * 참고 샘플: https://github.com/googlesamples/mlkit/tree/master/android/genai
- *
- * 기획서 요구사항:
- * - 로컬 DB에서 해당 방의 최근 N개 메시지를 조회하여 프롬프트 컨텍스트로 주입
- * - 3가지 페르소나(수락, 거절, 모호함) 텍스트 생성
- * - PII 마스킹 모듈 적용 필수
+ * 기본적으로 On-Device Gemini Nano를 사용하며, 에뮬레이터 환경 등 미지원 시
+ * Gemini Cloud API를 Fallback으로 사용하여 테스트 가능하도록 구현합니다.
  */
 class AICoreManager(private val context: Context) {
     companion object {
         private const val TAG = "AICoreManager"
-        private const val DEFAULT_CONTEXT_SIZE = 10
+        private const val DEFAULT_CONTEXT_SIZE = 50 // RAG 성능 향상을 위해 50개로 확대
     }
 
-    // ML Kit GenAI Prompt API 클라이언트
-    private var generativeModel: GenerativeModel? = null
+    // Nano (On-Device) 모델
+    private var nanoModel: NanoModel? = null
+    
+    // Cloud 모델
+    private var cloudModel: CloudModel? = null
+    private var _apiKey: String? = null
+
+    init {
+        _apiKey = getApiKeyFromProperties()
+        if (!_apiKey.isNullOrBlank()) {
+            cloudModel = CloudModel(
+                modelName = "gemini-2.5-flash-lite",
+                apiKey = _apiKey!!
+            )
+            Log.d(TAG, "Cloud model initialized with API Key")
+        }
+    }
 
     /**
-     * GenerativeModel을 초기화합니다.
-     * ML Kit GenAI Prompt API의 Generation.getClient()를 사용합니다.
+     * SharedPreferences에서 Gemini API Key를 가져옵니다.
      */
-    private fun ensureModel(): GenerativeModel {
-        if (generativeModel == null) {
-            generativeModel = Generation.getClient()
-            Log.d(TAG, "GenerativeModel initialized via Generation.getClient()")
+    private fun getApiKeyFromProperties(): String? {
+        return try {
+            val prefs = context.getSharedPreferences("autome_prefs", Context.MODE_PRIVATE)
+            prefs.getString("gemini_api_key", null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read API Key from SharedPreferences: $e")
+            null
         }
-        return generativeModel!!
+    }
+
+    /**
+     * Nano 모델 초기화
+     */
+    private fun ensureNanoModel(): NanoModel {
+        if (nanoModel == null) {
+            nanoModel = NanoGeneration.getClient()
+            Log.d(TAG, "Nano model initialized via NanoGeneration.getClient()")
+        }
+        return nanoModel!!
     }
 
     /**
      * AI 기능 사용 가능 여부를 확인합니다.
-     *
-     * @return FeatureStatus (AVAILABLE, DOWNLOADABLE, DOWNLOADING, UNAVAILABLE)
      */
     suspend fun checkStatus(): Int {
         return try {
-            ensureModel().checkStatus()
+            ensureNanoModel().checkStatus()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to check feature status: $e")
             -1 // UNAVAILABLE
@@ -67,7 +86,7 @@ class AICoreManager(private val context: Context) {
      */
     suspend fun downloadModel() {
         try {
-            ensureModel().download().collect { status ->
+            ensureNanoModel().download().collect { status ->
                 when (status) {
                     is DownloadStatus.DownloadStarted ->
                         Log.d(TAG, "Model download started, bytes: ${status.bytesToDownload}")
@@ -86,10 +105,6 @@ class AICoreManager(private val context: Context) {
 
     /**
      * 특정 채팅방의 최근 메시지 컨텍스트를 기반으로 3가지 페르소나의 답변을 생성합니다.
-     *
-     * @param roomId 대화방 ID
-     * @param contextSize 컨텍스트로 사용할 최근 메시지 수
-     * @return 3가지 페르소나(수락, 거절, 모호함)의 답변 리스트
      */
     suspend fun generateReplyFromDb(roomId: String, roomRule: String? = null, contextSize: Int = DEFAULT_CONTEXT_SIZE): List<String> {
         return withContext(Dispatchers.IO) {
@@ -100,10 +115,14 @@ class AICoreManager(private val context: Context) {
                 Log.w(TAG, "No messages found for roomId: $roomId, returning default replies")
                 return@withContext getDefaultReplies()
             }
-
             val contextStrings = recentMessages.reversed().map { msg ->
                 val role = if (msg.isSentByMe) "나" else msg.sender
                 "$role: ${msg.message}"
+            }
+            
+            // RAG 작동 확인용 로그
+            if (contextStrings.isNotEmpty()) {
+                Log.d(TAG, "[RAG] Retrieved ${contextStrings.size} messages for context. Last message: \"${contextStrings.last()}\"")
             }
 
             Log.d(TAG, "Generating reply with ${contextStrings.size} context messages for room: $roomId")
@@ -112,130 +131,149 @@ class AICoreManager(private val context: Context) {
     }
 
     /**
-     * 메시지 컨텍스트 리스트를 받아 3가지 페르소나의 답변을 생성합니다.
-     *
-     * @param messageContext 대화 맥락 문자열 리스트
-     * @return 3가지 페르소나(수락, 거절, 모호함)의 답변 리스트
+     * 메시지 컨텍스트 리스트를 받아 문맥에 최적화된 3가지 답변을 한 번에 생성합니다.
      */
     suspend fun generateReply(messageContext: List<String>, roomRule: String? = null): List<String> {
-        Log.d(TAG, "Generating replies based on context. length: ${messageContext.size}")
+        Log.d(TAG, "Generating 3 intelligent replies based on context. length: ${messageContext.size}")
 
         val contextBlock = messageContext.joinToString("\n")
+        val prompt = buildSingleCallPrompt(contextBlock, roomRule)
 
-        // 3가지 페르소나별 프롬프트 생성
-        val personaPrompts = listOf(
-            buildPersonaPrompt(contextBlock, roomRule, "수락",
-                "상대의 요청이나 제안에 긍정적으로 동의하는 답변을 한국어로 생성하세요. 친근하고 자연스러운 말투로 1~2문장으로 작성하세요."),
-            buildPersonaPrompt(contextBlock, roomRule, "거절",
-                "상대의 요청이나 제안을 정중하게 거절하는 답변을 한국어로 생성하세요. 예의 바르지만 확고한 말투로 1~2문장으로 작성하세요."),
-            buildPersonaPrompt(contextBlock, roomRule, "모호함",
-                "상대의 요청이나 제안에 대해 애매하게 답변하세요. 한국어로 확답을 피하면서 자연스러운 말투로 1~2문장으로 작성하세요.")
-        )
-
-        // 각 페르소나별로 AI 생성 시도, 실패 시 Fallback
-        val replies = mutableListOf<String>()
-        for ((index, prompt) in personaPrompts.withIndex()) {
-            val reply = try {
-                generateWithMLKit(prompt)
-            } catch (e: Exception) {
-                Log.w(TAG, "ML Kit inference failed for persona $index, using fallback: $e")
-                getFallbackReply(index)
+        val rawResponse = try {
+            // 1. 먼저 Nano (On-Device) 시도
+            generateWithMLKit(prompt)
+        } catch (e: Exception) {
+            Log.w(TAG, "Nano inference failed, trying Cloud fallback: $e")
+            
+            // 2. 실패 시 Cloud 시도
+            try {
+                generateWithCloud(prompt)
+            } catch (ce: Exception) {
+                Log.e(TAG, "Cloud inference also failed: $ce")
+                null
             }
-            replies.add(PiiMasker.maskText(reply))
         }
 
-        return replies
+        // 3. 응답 파싱 및 정제
+        val replies = if (rawResponse != null) {
+            parseMultiReply(rawResponse)
+        } else {
+            getDefaultReplies()
+        }
+
+        return replies.map { PiiMasker.maskText(it) }
     }
 
     /**
-     * 페르소나별 프롬프트를 빌드합니다.
+     * AI가 한 번에 생성한 3개의 답변을 분리합니다.
      */
-    private fun buildPersonaPrompt(contextBlock: String, roomRule: String?, personaName: String, instruction: String): String {
+    private fun parseMultiReply(raw: String): List<String> {
+        val lines = raw.lines()
+            .map { it.trim().replace(Regex("^([\\d\\-\\*\\.]+\\s*)"), "") }
+            .filter { it.isNotBlank() && it.length > 1 }
+        
+        return if (lines.size >= 3) {
+            lines.take(3)
+        } else if (lines.isNotEmpty()) {
+            val result = lines.toMutableList()
+            while (result.size < 3) {
+                result.add(result.last())
+            }
+            result
+        } else {
+            getDefaultReplies()
+        }
+    }
+
+    /**
+     * 지능형 단일 호출용 프롬프트를 빌드합니다.
+     */
+    private fun buildSingleCallPrompt(contextBlock: String, roomRule: String?): String {
         val ruleInstruction = if (!roomRule.isNullOrBlank()) {
-            "\n다음 특별 규칙을 반드시 지켜서 작성하세요: \"$roomRule\"\n"
+            "\n[특별 규칙: \"$roomRule\"]\n"
         } else {
             ""
         }
-        
+
         return """
-            |다음은 최근 대화 내역입니다:
+            |당신은 사용자의 원활한 채팅을 도와주는 똑똑한 AI 비서입니다.
+            |다음은 최근 대화 내역입니다 (가장 하단이 마지막 메시지입니다):
             |---
             |$contextBlock
             |---
             |
-            |위 대화의 마지막 메시지에 대한 [$personaName] 톤의 답장을 생성하세요.$ruleInstruction
-            |$instruction
-            |답장만 출력하세요. 설명이나 접두사 없이 답장 문장만 작성하세요.
+            |**미션**: 위 대화 내역의 흐름을 반영하여 가장 마지막 메시지에 대한 자연스러운 답변 3가지를 생성하세요.
+            |**핵심 원칙**:
+            |1. **최신 메시지 최우선**: 가장 마지막 메시지의 질문이나 내용에 직접적인 답장을 생성하는 것이 기본입니다.
+            |2. **배경지식의 자연스러운 활용**: 이전 대화에서 나온 중요한 정보(좋아하는 노래, 음식, 취향, 별명, 이전 약속 등)가 있다면 이를 답변에 **자연스럽게 녹여내세요**. (예: 영화 약속을 정할 때, "아 아까 좋아한다고 했던 거북이 노래 같은 음악 영화 볼래?" 처럼 맥락을 이어가는 식)
+            |3. **대화의 연속성**: 단순히 기계적인 답변이 아니라, 이전 대화를 기억하고 있다는 느낌을 주어 사용자가 친밀감을 느끼게 하세요. 
+            |4. **주객전도 금지**: 하지만 현재 주제와 너무 동떨어진 옛날 이야기를 뜬금없이 꺼내지는 마세요. 흐름이 끊기지 않는 선에서만 배경지식을 활용하세요.
+            |5. **다양한 페르소나**: 상황에 맞춰 '적극적인 공감', '재치 있는 질문', '간결하고 명확한 대답' 등 3가지 답변이 서로 다른 뉘앙스를 가지게 하세요.
+            |$ruleInstruction
+            |
+            |출력 형식:
+            |1. [답변 1]
+            |2. [답변 2]
+            |3. [답변 3]
+            |
+            |제약 사항:
+            |1. 한국어로만 답변하고, 상대방의 말투(반말/존댓말)를 정확히 따르세요.
+            |2. 따옴표나 부연 설명 없이 번호와 답변 문장만 출력하세요.
         """.trimMargin()
     }
 
     /**
-     * ML Kit GenAI Prompt API를 사용하여 텍스트를 생성합니다.
-     *
-     * GenerativeModel.generateContent()를 호출하여 Gemini Nano 온디바이스 추론을 수행합니다.
+     * ML Kit (Nano) 온디바이스 추론
      */
     private suspend fun generateWithMLKit(prompt: String): String {
-        val model = ensureModel()
-
-        // Feature status 확인
+        val model = ensureNanoModel()
         val status = model.checkStatus()
-        Log.d(TAG, "ML Kit GenAI feature status: $status")
 
-        // 모델이 사용 불가능하면 예외 발생 → 호출부에서 Fallback 처리
-        if (status == 0) { // UNAVAILABLE
-            throw Exception("ML Kit GenAI Prompt API is not available on this device")
-        }
+        if (status == 0) throw Exception("Nano Unavailable")
+        if (status == 1 || status == 2) downloadModel()
 
-        // 필요 시 모델 다운로드
-        if (status == 1 || status == 2) { // DOWNLOADABLE or DOWNLOADING
-            downloadModel()
-        }
-
-        // 추론 실행
-        val request = generateContentRequest(TextPart(prompt)) {
+        val request = nanoRequest(NanoTextPart(prompt)) {
             temperature = 0.8f
             maxOutputTokens = 256
         }
         val response = model.generateContent(request)
-
-        val generatedText = response.candidates.firstOrNull()?.text
-        if (generatedText.isNullOrBlank()) {
-            throw Exception("Empty response from ML Kit GenAI")
-        }
-
-        Log.d(TAG, "ML Kit generated: ${generatedText.take(50)}...")
-        return generatedText.trim()
+        val text = response.candidates.firstOrNull()?.text
+        
+        if (text.isNullOrBlank()) throw Exception("Empty Nano response")
+        return text.trim()
     }
 
     /**
-     * ML Kit 추론이 실패했을 때 사용하는 Fallback 응답
+     * Gemini Cloud API 추론
      */
+    private suspend fun generateWithCloud(prompt: String): String {
+        val model = cloudModel ?: throw Exception("Cloud model not initialized (No API Key?)")
+        
+        val response = model.generateContent(prompt)
+        val text = response.text
+        
+        if (text.isNullOrBlank()) throw Exception("Empty Cloud response")
+        Log.d(TAG, "Cloud generated: ${text.take(50)}...")
+        return text.trim()
+    }
+
     private fun getFallbackReply(personaIndex: Int): String {
         return when (personaIndex) {
-            0 -> "네, 알겠습니다! 확인했어요."      // 수락
-            1 -> "죄송한데 지금은 어려울 것 같아요."   // 거절
-            2 -> "음, 조금 더 생각해볼게요."          // 모호함
-            else -> "확인했습니다."
+            0 -> "정말요? 좋은 소식이네요! 대박이에요."
+            1 -> "그렇군요! 그럼 그 이후에는 어떻게 됐나요?"
+            2 -> "아하, 확인했습니다!"
+            else -> "네, 알겠습니다."
         }
     }
 
-    /**
-     * 컨텍스트 없이 사용하는 기본 응답
-     */
     private fun getDefaultReplies(): List<String> {
-        return listOf(
-            "네, 확인했습니다.",
-            "지금은 어렵습니다.",
-            "글쎄요, 조금 더 생각해볼게요."
-        )
+        return listOf("네, 확인했습니다.", "지금은 어렵습니다.", "글쎄요, 조금 더 생각해볼게요.")
     }
 
-    /**
-     * 리소스 정리. 사용 후 반드시 호출 필요.
-     */
     fun close() {
-        generativeModel?.close()
-        generativeModel = null
-        Log.d(TAG, "GenerativeModel closed")
+        nanoModel?.close()
+        nanoModel = null
+        cloudModel = null
+        Log.d(TAG, "AICore resources closed")
     }
 }

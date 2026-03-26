@@ -15,4 +15,7 @@ interface RoomRuleDao {
     
     @Query("DELETE FROM room_rules WHERE roomId = :roomId")
     suspend fun deleteRule(roomId: String)
+
+    @Query("DELETE FROM room_rules")
+    suspend fun deleteAllRules()
 }

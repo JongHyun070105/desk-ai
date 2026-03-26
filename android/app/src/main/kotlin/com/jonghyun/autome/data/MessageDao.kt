@@ -49,4 +49,8 @@ interface MessageDao {
     // ── 특정 채팅방 모든 메시지 삭제 ──
     @Query("DELETE FROM messages WHERE roomId = :roomId")
     fun deleteMessagesByRoom(roomId: String)
+
+    // ── 모든 메시지 삭제 ──
+    @Query("DELETE FROM messages")
+    fun deleteAllMessages()
 }

@@ -137,6 +137,10 @@ class FloatingReplyService : Service() {
             try {
                 windowManager?.addView(floatingView, layoutParams)
                 Log.d(TAG, "Floating view added for: $sender")
+                
+                // 나타날 때 부드러운 페이드인 애니메이션 추가
+                floatingView?.alpha = 0f
+                floatingView?.animate()?.alpha(1f)?.setDuration(300)?.start()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to add floating view: $e")
                 stopSelf()
@@ -153,7 +157,7 @@ class FloatingReplyService : Service() {
             val btnReply1 = view.findViewById<Button>(R.id.btnReply1)
             val btnReply2 = view.findViewById<Button>(R.id.btnReply2)
             val btnReply3 = view.findViewById<Button>(R.id.btnReply3)
-            val btnClose = view.findViewById<Button>(R.id.btnClose)
+            val btnClose = view.findViewById<View>(R.id.btnClose) // ImageButton이므로 View로 받거나 ImageButton으로 캐스팅
 
             btnReply1?.text = replies[0]
             btnReply2?.text = replies[1]
@@ -248,11 +252,19 @@ class FloatingReplyService : Service() {
     }
 
     private fun removeFloatingView() {
-        floatingView?.let {
+        floatingView?.let { view ->
             try {
-                windowManager?.removeView(it)
+                // 사라질 때 페이드아웃 후 제거
+                view.animate().alpha(0f).setDuration(200).withEndAction {
+                    try {
+                        windowManager?.removeView(view)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error removing view in endAction: $e")
+                    }
+                }.start()
             } catch (e: Exception) {
-                Log.e(TAG, "Error removing floating view: $e")
+                Log.e(TAG, "Error starting fadeout animation: $e")
+                windowManager?.removeView(view)
             }
         }
         floatingView = null

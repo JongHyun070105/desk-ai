@@ -22,6 +22,21 @@ class NativeBridge {
     }
   }
 
+  /// 사용량 통계 권한 획득
+  static Future<bool> getUsageStatsPermission() async {
+    return await _channel.invokeMethod('getUsageStatsPermission');
+  }
+
+  /// 배터리 최적화 무시 요청
+  static Future<bool> requestIgnoreBatteryOptimizations() async {
+    return await _channel.invokeMethod('requestIgnoreBatteryOptimizations');
+  }
+
+  /// 배터리 최적화 무시 여부 확인
+  static Future<bool> isIgnoringBatteryOptimizations() async {
+    return await _channel.invokeMethod('isIgnoringBatteryOptimizations');
+  }
+
   /// 다른 앱 위에 표시 설정 화면으로 이동
   static Future<void> openOverlaySettings() async {
     try {
@@ -176,6 +191,60 @@ class NativeBridge {
       return result;
     } on PlatformException catch (e) {
       debugPrint('NativeBridge Error (deleteChatRoom): $e');
+      return false;
+    }
+  }
+
+  /// 모든 채팅 메시지 및 규칙 삭제 (전체 초기화)
+  static Future<bool> deleteAllMessages() async {
+    try {
+      final bool result = await _channel.invokeMethod('deleteAllMessages');
+      return result;
+    } on PlatformException catch (e) {
+      debugPrint('NativeBridge Error (deleteAllMessages): $e');
+      return false;
+    }
+  }
+
+  /// 기존 'kakao_' 접두사 데이터 마이그레이션
+  static Future<bool> migrateOldRoomIds() async {
+    try {
+      final bool result = await _channel.invokeMethod('migrateOldRoomIds');
+      return result;
+    } on PlatformException catch (e) {
+      debugPrint('NativeBridge Error (migrateOldRoomIds): $e');
+      return false;
+    }
+  }
+
+  /// Gemini API Key 설정 (에뮬레이터 테스트용 클라우드 Fallback 활성화)
+  static Future<bool> setGeminiApiKey(String apiKey) async {
+    try {
+      final bool result = await _channel.invokeMethod(
+        'setGeminiApiKey',
+        {'apiKey': apiKey},
+      );
+      return result;
+    } on PlatformException catch (e) {
+      debugPrint('NativeBridge Error (setGeminiApiKey): $e');
+      return false;
+    }
+  }
+
+  /// 카카오톡 텍스트 파일 파싱 및 DB 저장
+  static Future<bool> processFile(String filePath, {String? roomName, String meSenderName = '나'}) async {
+    try {
+      final bool result = await _channel.invokeMethod(
+        'processFile',
+        {
+          'filePath': filePath,
+          'roomName': roomName,
+          'meSenderName': meSenderName,
+        },
+      );
+      return result;
+    } on PlatformException catch (e) {
+      debugPrint('NativeBridge Error (processFile): $e');
       return false;
     }
   }

@@ -20,43 +20,75 @@ class AutoMeNotificationListenerService : NotificationListenerService() {
     private val scope = CoroutineScope(Dispatchers.IO)
     private val TAG = "AutoMeCaptured"
 
-    // 카카오톡 패키지명
-    private val KAKAO_PACKAGE = "com.kakao.talk"
+    // 지원 패키지: 카카오톡, 구글 메시지, 삼성 메시지, 기본 SMS (사용자 요청 반영)
+    private val SUPPORTED_PACKAGES = setOf(
+        "com.kakao.talk",                 // 카카오톡
+        "com.google.android.apps.messaging", // 구글 메시지
+        "com.samsung.android.messaging",  // 삼성 메시지
+        "com.android.mms"                 // 기본 SMS
+    )
 
     // 동일한 알림 업데이트로 인한 중복 처리 방지 (깜빡임 해결)
     private val lastCapturedTexts = mutableMapOf<String, String>()
+    // AI 답변 생성 쿨다운 관리 (방별 최소 10초 간격)
+    private val lastAiReplyTimes = mutableMapOf<String, Long>()
+    private val AI_COOLDOWN_MS = 10000L
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
 
         val packageName = sbn.packageName ?: ""
         
-        // 1. 시스템 알림 및 우리 앱 알림 무시 (카카오톡, 메신저 등만 처리)
-        if (packageName == "android" || packageName == "com.android.systemui" || packageName == applicationContext.packageName) {
+        // 1. 지원하는 메시징 앱만 처리
+        if (!SUPPORTED_PACKAGES.contains(packageName)) {
+            // 카테고리가 메시지나 소셜인 경우에도 일단 허용 (유연성)
+            val category = sbn.notification?.category
+            if (category != Notification.CATEGORY_MESSAGE && category != Notification.CATEGORY_SOCIAL) {
+                return
+            }
+        }
+
+        // 2. 우리 앱 알림 무시
+        if (packageName == applicationContext.packageName) {
             return
         }
 
-        // 2. 카테고리가 메시지가 아닌 경우 필터링 (일부 앱은 null일 수 있어 유연하게 처리)
-        val category = sbn.notification?.category
-        if (category != null && category != Notification.CATEGORY_MESSAGE && category != Notification.CATEGORY_SOCIAL) {
-            // 시스템 앱인 경우 더 엄격하게 필터링
-            if (packageName.contains("android") || packageName.contains("system")) return
+        val extras = sbn.notification?.extras ?: return
+        // MessagingStyle 추출 (단체방 대응)
+        val messagingStyle = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(sbn.notification)
+        val conversationTitle = messagingStyle?.conversationTitle?.toString()
+        val isGroup = extras.getBoolean("android.isGroupConversation")
+        // 1순위: MessagingStyle의 단체방 제목, 2순위: android.subText, 3순위: android.summaryText, 4순위: android.title
+        val title = if (isGroup) {
+            (conversationTitle ?: extras.getCharSequence("android.subText") ?: extras.getCharSequence("android.summaryText") ?: extras.getCharSequence("android.title"))?.toString() ?: "Unknown Group"
+        } else {
+            extras.getCharSequence("android.title")?.toString() ?: "Unknown"
+        }
+        val text = extras.getCharSequence("android.text")?.toString() ?: ""
+
+        // 실제 발화자(sender) 추출: MessagingStyle이 있으면 마지막 메시지의 발신자, 없으면 title
+        val realSender = if (messagingStyle != null && messagingStyle.messages.isNotEmpty()) {
+            messagingStyle.messages.last().person?.name?.toString() ?: title
+        } else {
+            // 단톡방인 경우 title이 방 이름이므로, 발신자 정보를 찾을 수 없으면 그대로 title 사용 (1:1은 sender가 title과 동일)
+            title
         }
 
-        val extras = sbn.notification?.extras
-        val title = extras?.getString("android.title") ?: "Unknown"
-        val text = extras?.getCharSequence("android.text")?.toString() ?: ""
-
         // 3. 제목이나 내용에 시스템성 문구가 포함된 경우 제외
-        if (title == "Android 시스템" || title.contains("Auto-Me") || text.contains("running in the background")) {
+        if (title == "Android 시스템" || title.contains("Auto-Me") || 
+            text.contains("running in the background") || text.contains("일기예보")) {
             return
         }
 
         if (text.isEmpty()) return
 
-        // roomId 생성
+        // roomId 생성 (카카오톡의 경우 파일 임포트와 통합을 위해 kakao_상단타이틀 형식 사용)
         val appName = getAppLabel(packageName)
-        val roomId = "notification_${appName}_$title"
+        val roomId = if (packageName == "com.kakao.talk") {
+            title // 카카오톡은 접두사 없이 순수 방 이름 사용
+        } else {
+            "notification_${appName}_$title"
+        }
 
         // 이전에 캡처한 내용과 동일하면 무시 (단순 메타데이터 업데이트 방지)
         if (lastCapturedTexts[roomId] == text) {
@@ -64,10 +96,10 @@ class AutoMeNotificationListenerService : NotificationListenerService() {
         }
         lastCapturedTexts[roomId] = text
 
-        Log.d(TAG, "Captured Notification: pkg=$packageName, From=$title, Text=$text")
+        Log.d(TAG, "Captured Notification: pkg=$packageName, Room=$title, Sender=$realSender, Text=$text")
 
         // DB에 메시지 저장
-        saveReceivedMessage(roomId, title, text)
+        saveReceivedMessage(roomId, realSender, text)
 
         // RemoteInput 추출 후 ReplyActionStore에 저장
         val remoteInputInfo = extractRemoteInput(sbn.notification)
@@ -75,13 +107,13 @@ class AutoMeNotificationListenerService : NotificationListenerService() {
             ReplyActionStore.put(roomId, ReplyActionStore.ReplyAction(
                 replyKey = remoteInputInfo.first,
                 pendingIntent = remoteInputInfo.second,
-                sender = title
+                sender = realSender
             ))
-            Log.d(TAG, "RemoteInput stored for roomId=$roomId")
+            Log.d(TAG, "RemoteInput stored for roomId=$roomId, sender=$realSender")
         }
 
         // AI 답변 생성 후 플로팅 뷰 표시
-        tryShowFloatingReply(title, roomId, remoteInputInfo)
+        tryShowFloatingReply(realSender, roomId, remoteInputInfo)
     }
 
     private fun saveReceivedMessage(roomId: String, sender: String, text: String) {
@@ -108,6 +140,15 @@ class AutoMeNotificationListenerService : NotificationListenerService() {
         roomId: String,
         remoteInputInfo: Pair<String, PendingIntent>?
     ) {
+        val now = System.currentTimeMillis()
+        val lastTime = lastAiReplyTimes[roomId] ?: 0L
+        
+        if (now - lastTime < AI_COOLDOWN_MS) {
+            Log.d(TAG, "AI Cooldown active for $roomId, skipping reply generation")
+            return
+        }
+        lastAiReplyTimes[roomId] = now
+
         scope.launch {
             try {
                 val db = AppDatabase.getDatabase(applicationContext)

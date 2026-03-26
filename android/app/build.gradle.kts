@@ -56,6 +56,9 @@ dependencies {
     // ML Kit GenAI - Gemini Nano On-Device AI
     implementation("com.google.mlkit:genai-prompt:1.0.0-beta1")
 
+    // Google Generative AI - Gemini Cloud API (Emulator testing fallback)
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+
     // ML Kit GenAI 의존성
     implementation("androidx.concurrent:concurrent-futures:1.3.0")
     implementation("com.google.guava:guava:32.0.1-jre")

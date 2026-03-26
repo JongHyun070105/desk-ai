@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../core/native_bridge.dart';
 import '../../../core/theme/app_theme.dart';
@@ -5,9 +6,8 @@ import '../../../core/widgets/glass_card.dart';
 import 'chat_detail_screen.dart';
 import '../../fallback/presentation/txt_import_screen.dart';
 
-/// 채팅방 목록 화면
-/// NotificationListenerService / AccessibilityService / TXT Import로 수집된
-/// 메시지를 roomId별로 그루핑하여 채팅앱 스타일로 표시합니다.
+enum SortOption { date, name }
+
 class ChatRoomListScreen extends StatefulWidget {
   const ChatRoomListScreen({super.key});
 
@@ -20,46 +20,103 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
   List<Map<String, dynamic>> _filteredRooms = [];
   bool _isLoading = false;
   final _searchController = TextEditingController();
+  
+  // 신규 추가 상태
+  Timer? _refreshTimer;
+  SortOption _currentSort = SortOption.date;
+  bool _isEditMode = false;
+  final Set<String> _selectedRoomIds = {};
 
   @override
   void initState() {
     super.initState();
-    _loadRooms();
-    _searchController.addListener(_filterRooms);
+    _loadRooms(showLoading: true);
+    _searchController.addListener(_filterAndSortRooms);
+    
+    // 3초마다 자동 새로고침 설정
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) => _loadRooms(showLoading: false));
+    
+    // 이전 버전 데이터 마이그레이션 실행 (최초 1회)
+    NativeBridge.migrateOldRoomIds();
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadRooms() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadRooms({bool showLoading = false}) async {
+    if (showLoading) setState(() => _isLoading = true);
     try {
       final rooms = await NativeBridge.getChatRooms();
-      setState(() {
-        _rooms = rooms;
-        _filteredRooms = rooms;
-      });
+      if (mounted) {
+        setState(() {
+          _rooms = rooms;
+          _filterAndSortRooms();
+        });
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (showLoading && mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _filterRooms() {
+  void _filterAndSortRooms() {
     final query = _searchController.text.toLowerCase();
+    List<Map<String, dynamic>> result = _rooms;
+
+    // 1. 필터링
+    if (query.isNotEmpty) {
+      result = result.where((room) {
+        final roomId = (room['roomId'] ?? '').toString().toLowerCase();
+        final lastMessage = (room['lastMessage'] ?? '').toString().toLowerCase();
+        return roomId.contains(query) || lastMessage.contains(query);
+      }).toList();
+    }
+
+    // 2. 정렬
+    if (_currentSort == SortOption.date) {
+      result.sort((a, b) => (b['lastTimestamp'] as int).compareTo(a['lastTimestamp'] as int));
+    } else {
+      result.sort((a, b) => (a['roomId'] as String).compareTo(b['roomId'] as String));
+    }
+
     setState(() {
-      if (query.isEmpty) {
-        _filteredRooms = _rooms;
-      } else {
-        _filteredRooms = _rooms.where((room) {
-          final roomId = (room['roomId'] ?? '').toString().toLowerCase();
-          final lastMessage = (room['lastMessage'] ?? '').toString().toLowerCase();
-          return roomId.contains(query) || lastMessage.contains(query);
-        }).toList();
-      }
+      _filteredRooms = result;
     });
+  }
+
+  Future<void> _deleteSelectedRooms() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(_selectedRoomIds.length == _rooms.length ? '전체 삭제' : '선택 삭제'),
+        content: Text('${_selectedRoomIds.length}개의 채팅방을 삭제하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      setState(() => _isLoading = true);
+      if (_selectedRoomIds.length == _rooms.length) {
+        await NativeBridge.deleteAllMessages();
+      } else {
+        for (final id in _selectedRoomIds) {
+          await NativeBridge.deleteChatRoom(id);
+        }
+      }
+      _selectedRoomIds.clear();
+      _isEditMode = false;
+      await _loadRooms(showLoading: true);
+    }
   }
 
   @override
@@ -68,53 +125,89 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('채팅'),
+        title: _isEditMode ? Text('${_selectedRoomIds.length}개 선택됨') : const Text('채팅'),
+        leading: _isEditMode
+            ? IconButton(
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => setState(() {
+                  _isEditMode = false;
+                  _selectedRoomIds.clear();
+                }),
+              )
+            : null,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: _loadRooms,
-          ),
+          if (!_isEditMode) ...[
+            PopupMenuButton<SortOption>(
+              icon: const Icon(Icons.sort_rounded),
+              onSelected: (option) {
+                setState(() => _currentSort = option);
+                _filterAndSortRooms();
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(value: SortOption.date, child: Text('최신순')),
+                const PopupMenuItem(value: SortOption.name, child: Text('이름순')),
+              ],
+            ),
+            IconButton(
+              icon: const Icon(Icons.edit_note_rounded),
+              onPressed: () => setState(() => _isEditMode = true),
+            ),
+          ] else ...[
+            IconButton(
+              icon: Icon(_selectedRoomIds.length == _filteredRooms.length
+                  ? Icons.deselect_rounded
+                  : Icons.select_all_rounded),
+              onPressed: () {
+                setState(() {
+                  if (_selectedRoomIds.length == _filteredRooms.length) {
+                    _selectedRoomIds.clear();
+                  } else {
+                    _selectedRoomIds.addAll(_filteredRooms.map((r) => r['roomId'] as String));
+                  }
+                });
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
+              onPressed: _selectedRoomIds.isEmpty ? null : _deleteSelectedRooms,
+            ),
+          ],
         ],
       ),
       body: Column(
         children: [
-          // ── 검색 바 ──
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: '채팅방 검색...',
-                prefixIcon: Icon(
-                  Icons.search_rounded,
-                  color: context.textTertiary,
+          if (!_isEditMode)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: '채팅방 검색...',
+                  prefixIcon: Icon(Icons.search_rounded, color: context.textTertiary),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded, size: 20),
+                          onPressed: () => _searchController.clear(),
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: isDark ? AppColors.darkSurface : const Color(0xFFF4F1ED),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear_rounded, size: 20),
-                        onPressed: () => _searchController.clear(),
-                      )
-                    : null,
-                filled: true,
-                fillColor: isDark ? AppColors.darkSurface : const Color(0xFFF4F1ED),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
             ),
-          ),
           const SizedBox(height: 4),
-
-          // ── 채팅방 목록 ──
           Expanded(
-            child: _isLoading
+            child: _isLoading && _rooms.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : _filteredRooms.isEmpty
                     ? _buildEmptyState()
                     : RefreshIndicator(
-                        onRefresh: _loadRooms,
+                        onRefresh: () => _loadRooms(showLoading: true),
                         color: AppColors.primary,
                         child: ListView.builder(
                           padding: const EdgeInsets.only(left: 12, right: 12, top: 4, bottom: 100),
@@ -127,21 +220,20 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const TxtImportScreen(),
+      floatingActionButton: _isEditMode
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const TxtImportScreen()),
+                ).then((_) => _loadRooms(showLoading: true));
+              },
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('대화 추가'),
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
             ),
-          ).then((_) => _loadRooms());
-        },
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('대화 추가'),
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
-        elevation: 2,
-      ),
     );
   }
 
@@ -150,28 +242,9 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.chat_bubble_outline_rounded,
-            size: 64,
-            color: context.textTertiary.withValues(alpha: 0.5),
-          ),
+          Icon(Icons.chat_bubble_outline_rounded, size: 64, color: context.textTertiary.withValues(alpha: 0.5)),
           const SizedBox(height: 16),
-          Text(
-            '수집된 채팅이 없습니다',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: context.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '알림 접근을 허용하거나, TXT 파일을 가져와 보세요',
-            style: TextStyle(
-              fontSize: 13,
-              color: context.textTertiary,
-            ),
-          ),
+          Text('채팅방이 없습니다', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: context.textSecondary)),
         ],
       ),
     );
@@ -183,210 +256,131 @@ class _ChatRoomListScreenState extends State<ChatRoomListScreen> {
     final lastTimestamp = room['lastTimestamp'] as int? ?? 0;
     final messageCount = room['messageCount'] as int? ?? 0;
     final lastSender = room['lastSender']?.toString() ?? '';
+    final isSelected = _selectedRoomIds.contains(roomId);
 
-    // 방 이름 표시 (roomId에서 사람이 읽기 쉬운 형태로)
     final displayName = _formatRoomName(roomId);
-
-    // 아바타 색상 (roomId 기반 해시)
-    final avatarColors = [
-      AppColors.primary,
-      AppColors.secondary,
-      AppColors.featureFitting,
-      const Color(0xFF6B7B8D),
-      const Color(0xFFB67D5C),
-    ];
+    final avatarColors = [AppColors.primary, AppColors.secondary, AppColors.featureFitting, const Color(0xFF6B7B8D), const Color(0xFFB67D5C)];
     final avatarColor = avatarColors[roomId.hashCode.abs() % avatarColors.length];
 
-    return Dismissible(
-      key: Key(roomId),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.redAccent.withValues(alpha: 0.8),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
-      ),
-      confirmDismiss: (direction) async {
-        return await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('채팅방 삭제'),
-            content: const Text('이 채팅방의 메시지와 설정된 규칙이 모두 삭제됩니다. 계속하시겠습니까?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('취소'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: TextButton.styleFrom(foregroundColor: Colors.red),
-                child: const Text('삭제'),
-              ),
-            ],
-          ),
-        );
-      },
-      onDismissed: (direction) async {
-        final success = await NativeBridge.deleteChatRoom(roomId);
-        if (success) {
-          _loadRooms();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('채팅방이 삭제되었습니다.')),
-            );
-          }
-        } else {
-          _loadRooms();
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('삭제에 실패했습니다.')),
-            );
-          }
-        }
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: SoftCard(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          borderRadius: 16,
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ChatDetailScreen(
-                  roomId: roomId,
-                  displayName: displayName,
-                ),
-              ),
-            ).then((_) => _loadRooms());
-          },
-          child: Row(
-            children: [
-              // 아바타
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [avatarColor, avatarColor.withValues(alpha: 0.7)],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: SoftCard(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        borderRadius: 16,
+        onTap: _isEditMode
+            ? () {
+                setState(() {
+                  if (isSelected) {
+                    _selectedRoomIds.remove(roomId);
+                  } else {
+                    _selectedRoomIds.add(roomId);
+                  }
+                });
+              }
+            : () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatDetailScreen(roomId: roomId, displayName: displayName),
                   ),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Center(
-                  child: Text(
-                    displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
+                ).then((_) => _loadRooms());
+              },
+        child: Row(
+          children: [
+            if (_isEditMode) ...[
+              Checkbox(
+                value: isSelected,
+                activeColor: AppColors.primary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                onChanged: (val) {
+                  setState(() {
+                    if (val == true) {
+                      _selectedRoomIds.add(roomId);
+                    } else {
+                      _selectedRoomIds.remove(roomId);
+                    }
+                  });
+                },
               ),
-              const SizedBox(width: 14),
-
-              // 메시지 정보
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            displayName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: context.textPrimary,
-                            ),
-                          ),
-                        ),
-                        Text(
-                          _formatTimestamp(lastTimestamp),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: context.textTertiary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            lastSender.isNotEmpty ? '$lastSender: $lastMessage' : lastMessage,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: context.textSecondary,
-                            ),
-                          ),
-                        ),
-                        if (messageCount > 0)
-                          Container(
-                            margin: const EdgeInsets.only(left: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '$messageCount',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+              const SizedBox(width: 8),
             ],
-          ),
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [avatarColor, avatarColor.withValues(alpha: 0.7)],
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Center(
+                child: Text(
+                  displayName.isNotEmpty ? displayName[0].toUpperCase() : '?',
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: context.textPrimary),
+                        ),
+                      ),
+                      Text(_formatTimestamp(lastTimestamp), style: TextStyle(fontSize: 12, color: context.textTertiary)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          lastSender.isNotEmpty ? '$lastSender: $lastMessage' : lastMessage,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 13, color: context.textSecondary),
+                        ),
+                      ),
+                      if (messageCount > 0)
+                        Container(
+                          margin: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                          child: Text('$messageCount', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  String _formatRoomName(String roomId) {
-    // "notification_카카오톡_홍길동" → "홍길동"
-    // "shared_file_import" → "파일 가져오기"
-    // "local_file_import" → "파일 가져오기"
-    if (roomId.startsWith('notification_')) {
-      final parts = roomId.split('_');
-      return parts.length > 2 ? parts.sublist(2).join('_') : roomId;
-    }
-    if (roomId.contains('file_import')) return '파일 가져오기';
-    return roomId;
-  }
+  String _formatRoomName(String roomId) => roomId;
 
   String _formatTimestamp(int timestamp) {
     if (timestamp == 0) return '';
     final dt = DateTime.fromMillisecondsSinceEpoch(timestamp);
     final now = DateTime.now();
     final diff = now.difference(dt);
-
     if (diff.inMinutes < 1) return '방금';
     if (diff.inHours < 1) return '${diff.inMinutes}분 전';
-    if (diff.inDays < 1) {
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    }
+    if (diff.inDays < 1) return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     if (diff.inDays < 7) return '${diff.inDays}일 전';
     return '${dt.month}/${dt.day}';
   }
