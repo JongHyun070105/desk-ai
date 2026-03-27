@@ -13,6 +13,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
   bool _accessibilityEnabled = false;
   bool _notificationEnabled = false;
   bool _overlayEnabled = false;
+  bool _calendarEnabled = false;
   bool _isLoading = true;
 
   @override
@@ -45,6 +46,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
         _accessibilityEnabled = permissions['accessibility'] == true;
         _notificationEnabled = permissions['notification'] == true;
         _overlayEnabled = permissions['overlay'] == true;
+        _calendarEnabled = permissions['calendar'] == true;
         _isLoading = false;
       });
 
@@ -58,7 +60,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
   }
 
   bool _allPermissionsGranted() {
-    return _accessibilityEnabled && _notificationEnabled && _overlayEnabled;
+    return _accessibilityEnabled && _notificationEnabled && _overlayEnabled && _calendarEnabled;
   }
 
   @override
@@ -70,47 +72,56 @@ class _PermissionsScreenState extends State<PermissionsScreen> with WidgetsBindi
       ),
       body: _isLoading 
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(Icons.security, size: 64, color: Colors.blueAccent),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Auto-Me를 사용하려면\n다음 권한들이 필수적입니다.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    '안드로이드 정책상 아래 작업들은\n[설정 열기]를 눌러 직접 허용해주셔야 합니다.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 32),
-                  _buildPermissionItem(
-                    title: '1. 접근성 권한 (Accessibility)',
-                    description: '사용자의 타이핑 및 전송 이벤트를 감지합니다.',
-                    isGranted: _accessibilityEnabled,
-                    onOpenSettings: NativeBridge.openAccessibilitySettings,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildPermissionItem(
-                    title: '2. 알림 접근 허용 (Notification)',
-                    description: '수신된 채팅 메시지를 감지하고 읽어옵니다.',
-                    isGranted: _notificationEnabled,
-                    onOpenSettings: NativeBridge.openNotificationSettings,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildPermissionItem(
-                    title: '3. 다른 앱 위에 표시 (Overlay)',
-                    description: '화면 위에 AI 답장 플로팅 버튼을 띄웁니다.',
-                    isGranted: _overlayEnabled,
-                    onOpenSettings: NativeBridge.openOverlaySettings,
-                  ),
-                  const Spacer(),
-                ],
+          : SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Icon(Icons.security, size: 64, color: Colors.blueAccent),
+                    const SizedBox(height: 24),
+                    const Text(
+                      '대충톡을 사용하려면\n다음 권한들이 필수적입니다.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      '안드로이드 정책상 아래 작업들은\n[설정 열기]를 눌러 직접 허용해주셔야 합니다.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 32),
+                    _buildPermissionItem(
+                      title: '1. 접근성 권한 (Accessibility)',
+                      description: '사용자의 타이핑 및 전송 이벤트를 감지합니다.',
+                      isGranted: _accessibilityEnabled,
+                      onOpenSettings: NativeBridge.openAccessibilitySettings,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildPermissionItem(
+                      title: '2. 알림 접근 허용 (Notification)',
+                      description: '수신된 채팅 메시지를 감지하고 읽어옵니다.',
+                      isGranted: _notificationEnabled,
+                      onOpenSettings: NativeBridge.openNotificationSettings,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildPermissionItem(
+                      title: '3. 다른 앱 위에 표시 (Overlay)',
+                      description: '화면 위에 AI 답장 플로팅 버튼을 띄웁니다.',
+                      isGranted: _overlayEnabled,
+                      onOpenSettings: NativeBridge.openOverlaySettings,
+                    ),
+                    const SizedBox(height: 16),
+                    _buildPermissionItem(
+                      title: '4. 캘린더 접근 권한 (Calendar)',
+                      description: '오늘 일정을 확인하여 답변에 참고합니다.',
+                      isGranted: _calendarEnabled,
+                      onOpenSettings: NativeBridge.requestCalendarPermission,
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                ),
               ),
             ),
     );

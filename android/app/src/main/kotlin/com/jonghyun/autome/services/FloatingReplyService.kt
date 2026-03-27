@@ -138,38 +138,83 @@ class FloatingReplyService : Service() {
                 windowManager?.addView(floatingView, layoutParams)
                 Log.d(TAG, "Floating view added for: $sender")
                 
-                // 나타날 때 부드러운 페이드인 애니메이션 추가
+                // 1. 나타날 때 슬라이드 업 + 페이드인 애니메이션
+                floatingView?.translationY = 300f
                 floatingView?.alpha = 0f
-                floatingView?.animate()?.alpha(1f)?.setDuration(300)?.start()
+                floatingView?.animate()
+                    ?.translationY(0f)
+                    ?.alpha(1f)
+                    ?.setDuration(400)
+                    ?.setInterpolator(android.view.animation.DecelerateInterpolator())
+                    ?.withEndAction {
+                        // 진입 후 아이들 부유 애니메이션 시작
+                        startIdleFloatingAnimation()
+                    }
+                    ?.start()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to add floating view: $e")
                 stopSelf()
                 return
             }
-        } else {
-            Log.d(TAG, "Updating existing floating view for: $sender")
         }
 
-        // 컨텐츠 업데이트
+        // 컨텐츠 업데이트 및 항목별 순차 애니메이션
         floatingView?.let { view ->
             view.findViewById<TextView>(R.id.tvFloatingTitle)?.text = "$sender 에게 답장"
             
             val btnReply1 = view.findViewById<Button>(R.id.btnReply1)
             val btnReply2 = view.findViewById<Button>(R.id.btnReply2)
             val btnReply3 = view.findViewById<Button>(R.id.btnReply3)
-            val btnClose = view.findViewById<View>(R.id.btnClose) // ImageButton이므로 View로 받거나 ImageButton으로 캐스팅
+            val btnClose = view.findViewById<View>(R.id.btnClose)
 
-            btnReply1?.text = replies[0]
-            btnReply2?.text = replies[1]
-            btnReply3?.text = replies[2]
+            val buttons = listOf(btnReply1, btnReply2, btnReply3)
+            replies.forEachIndexed { index, reply ->
+                buttons.getOrNull(index)?.apply {
+                    text = reply
+                    alpha = 0f
+                    scaleX = 0.8f
+                    scaleY = 0.8f
+                    
+                    // 2. 버튼 순차적 팝인 (Staggered Animation)
+                    animate()
+                        .alpha(1f)
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setStartDelay((index * 100).toLong())
+                        .setDuration(300)
+                        .setInterpolator(android.view.animation.OvershootInterpolator())
+                        .start()
 
-            btnReply1?.setOnClickListener { sendReply(replies[0]) }
-            btnReply2?.setOnClickListener { sendReply(replies[1]) }
-            btnReply3?.setOnClickListener { sendReply(replies[2]) }
+                    setOnClickListener { 
+                        // 3. 클릭 피드백 애니메이션
+                        animate().scaleX(0.95f).scaleY(0.95f).setDuration(100).withEndAction {
+                            animate().scaleX(1f).scaleY(1f).setDuration(100).withEndAction {
+                                sendReply(reply)
+                            }.start()
+                        }.start()
+                    }
+                }
+            }
+
             btnClose?.setOnClickListener {
                 removeFloatingView()
                 stopSelf()
             }
+        }
+    }
+
+    /**
+     * 아이들 상태의 미세한 부유 효과
+     */
+    private fun startIdleFloatingAnimation() {
+        floatingView?.let { view ->
+            val animator = android.animation.ObjectAnimator.ofFloat(view, "translationY", -10f, 10f).apply {
+                duration = 2000
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            }
+            animator.start()
         }
     }
 
@@ -274,10 +319,10 @@ class FloatingReplyService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Auto-Me 답장 서비스",
+                "대충톡 답장 서비스",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Auto-Me 플로팅 답장 서비스 알림"
+                description = "대충톡 플로팅 답장 서비스 알림"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -286,7 +331,7 @@ class FloatingReplyService : Service() {
 
     private fun buildForegroundNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Auto-Me")
+            .setContentTitle("대충톡")
             .setContentText("답장 추천 서비스 실행 중")
             .setSmallIcon(android.R.drawable.ic_menu_send)
             .setPriority(NotificationCompat.PRIORITY_LOW)

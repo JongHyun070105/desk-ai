@@ -1,4 +1,4 @@
-/// Auto-Me PII 마스킹 로직 (PiiMasker.kt의 Dart 포팅)
+/// 대충톡 PII 마스킹 로직 (PiiMasker.kt의 Dart 포팅)
 ///
 /// Android 네이티브 PiiMasker.kt와 동일한 정규표현식을 사용하여
 /// Dart 환경에서 테스트 가능하도록 포팅한 클래스입니다.

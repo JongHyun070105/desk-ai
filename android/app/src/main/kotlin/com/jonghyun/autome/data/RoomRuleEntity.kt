@@ -7,5 +7,6 @@ import androidx.room.PrimaryKey
 data class RoomRuleEntity(
     @PrimaryKey
     val roomId: String,
-    val rule: String
+    val rule: String,
+    val isAutoReplyEnabled: Boolean = false
 )

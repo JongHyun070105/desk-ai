@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 
 class NativeBridge {
-  static const MethodChannel _channel = MethodChannel('com.jonghyun.autome/native');
+  static const MethodChannel _channel = MethodChannel('com.jonghyun.daechung_talk/native');
 
   /// 접근성 서비스 설정 화면으로 이동
   static Future<void> openAccessibilitySettings() async {
@@ -25,6 +25,11 @@ class NativeBridge {
   /// 사용량 통계 권한 획득
   static Future<bool> getUsageStatsPermission() async {
     return await _channel.invokeMethod('getUsageStatsPermission');
+  }
+
+  /// 캘린더 권한 요청
+  static Future<bool> requestCalendarPermission() async {
+    return await _channel.invokeMethod('requestCalendarPermission');
   }
 
   /// 배터리 최적화 무시 요청
@@ -55,12 +60,13 @@ class NativeBridge {
           'accessibility': result['accessibility'] == true,
           'notification': result['notification'] == true,
           'overlay': result['overlay'] == true,
+          'calendar': result['calendar'] == true,
         };
       }
-      return {'accessibility': false, 'notification': false, 'overlay': false};
+      return {'accessibility': false, 'notification': false, 'overlay': false, 'calendar': false};
     } on PlatformException {
       debugPrint('NativeBridge Error (checkServicesEnabled)');
-      return {'accessibility': false, 'notification': false, 'overlay': false};
+      return {'accessibility': false, 'notification': false, 'overlay': false, 'calendar': false};
     }
   }
 
@@ -154,11 +160,15 @@ class NativeBridge {
   }
 
   /// 채팅방 규칙 저장
-  static Future<bool> saveRoomRule(String roomId, String rule) async {
+  static Future<bool> saveRoomRule(String roomId, String rule, {bool isAutoReplyEnabled = true}) async {
     try {
       final bool result = await _channel.invokeMethod(
         'saveRoomRule',
-        {'roomId': roomId, 'rule': rule},
+        {
+          'roomId': roomId,
+          'rule': rule,
+          'isAutoReplyEnabled': isAutoReplyEnabled,
+        },
       );
       return result;
     } on PlatformException catch (e) {
@@ -168,13 +178,16 @@ class NativeBridge {
   }
 
   /// 채팅방 규칙 조회
-  static Future<String?> getRoomRule(String roomId) async {
+  static Future<Map<String, dynamic>?> getRoomRule(String roomId) async {
     try {
-      final String? result = await _channel.invokeMethod(
+      final dynamic result = await _channel.invokeMethod(
         'getRoomRule',
         {'roomId': roomId},
       );
-      return result;
+      if (result != null) {
+        return Map<String, dynamic>.from(result);
+      }
+      return null;
     } on PlatformException catch (e) {
       debugPrint('NativeBridge Error (getRoomRule): $e');
       return null;

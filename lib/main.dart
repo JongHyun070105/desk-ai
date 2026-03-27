@@ -12,16 +12,16 @@ void main() async {
   } catch (e) {
     debugPrint("Failed to load .env file: $e");
   }
-  runApp(const AutoMeApp());
+  runApp(const DaechungTalkApp());
 }
 
-class AutoMeApp extends StatelessWidget {
-  const AutoMeApp({super.key});
+class DaechungTalkApp extends StatelessWidget {
+  const DaechungTalkApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Auto-Me',
+      title: '대충톡',
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,

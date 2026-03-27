@@ -18,12 +18,12 @@ import android.util.Log
 class BootReceiver : BroadcastReceiver() {
 
     companion object {
-        private const val TAG = "AutoMeBoot"
+        private const val TAG = "DaeChungTok"
     }
 
     override fun onReceive(context: Context?, intent: Intent?) {
         if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-            Log.d(TAG, "Boot completed - Auto-Me services will be managed by system.")
+            Log.d(TAG, "Boot completed - 대충톡 services will be managed by system.")
             Log.d(TAG, "AccessibilityService: 시스템이 자동 복원 (사용자가 활성화한 경우)")
             Log.d(TAG, "NotificationListenerService: 시스템이 자동 복원 (사용자가 활성화한 경우)")
 

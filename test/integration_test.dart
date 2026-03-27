@@ -1,6 +1,6 @@
+import 'package:daechung_talk/core/utils/chat_log_parser.dart';
+import 'package:daechung_talk/core/utils/pii_masker.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:auto_me/core/utils/pii_masker.dart';
-import 'package:auto_me/core/utils/chat_log_parser.dart';
 
 void main() {
   group('MethodChannel 채널명 일관성 검증', () {

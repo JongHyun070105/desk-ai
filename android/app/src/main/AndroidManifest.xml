@@ -7,8 +7,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="com.google.android.apps.aicore.permission.USE_AICORE" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
     <application
-        android:label="Auto-Me"
+        android:label="대충톡"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -40,7 +41,7 @@
 
         <!-- Accessibility Service -->
         <service
-            android:name=".services.AutoMeAccessibilityService"
+            android:name=".services.DaechungAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -53,7 +54,7 @@
 
         <!-- Notification Listener Service -->
         <service
-            android:name=".services.AutoMeNotificationListenerService"
+            android:name=".services.DaechungNotificationService"
             android:label="@string/app_name"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
             android:exported="true">

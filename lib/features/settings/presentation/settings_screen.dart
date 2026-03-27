@@ -38,7 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Auto-Me 설정'),
+        title: const Text('대충톡 설정'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),

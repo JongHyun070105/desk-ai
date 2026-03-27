@@ -10,8 +10,8 @@ interface RoomRuleDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRule(rule: RoomRuleEntity)
 
-    @Query("SELECT rule FROM room_rules WHERE roomId = :roomId")
-    suspend fun getRuleForRoom(roomId: String): String?
+    @Query("SELECT * FROM room_rules WHERE roomId = :roomId")
+    suspend fun getRuleForRoom(roomId: String): RoomRuleEntity?
     
     @Query("DELETE FROM room_rules WHERE roomId = :roomId")
     suspend fun deleteRule(roomId: String)

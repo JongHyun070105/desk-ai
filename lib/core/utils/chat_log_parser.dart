@@ -1,4 +1,4 @@
-/// Auto-Me 카카오톡 대화 로그 파서 (MainActivity.kt의 Dart 포팅)
+/// 대충톡 카카오톡 대화 로그 파서 (MainActivity.kt의 Dart 포팅)
 ///
 /// Android 네이티브 parseAndInsertChatLog()와 동일한 정규표현식을 사용하여
 /// Dart 환경에서 테스트 가능하도록 포팅한 클래스입니다.

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:auto_me/core/theme/app_theme.dart';
+import 'package:daechung_talk/core/theme/app_theme.dart';
 
 /// 모던 소프트 카드 위젯
 /// 소프트 섀도우 + 미세 보더로 Apple 스타일 카드 구현

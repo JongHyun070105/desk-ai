@@ -1,5 +1,5 @@
+import 'package:daechung_talk/core/utils/pii_masker.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:auto_me/core/utils/pii_masker.dart';
 
 void main() {
   group('PiiMasker 테스트', () {

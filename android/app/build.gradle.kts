@@ -63,4 +63,6 @@ dependencies {
     implementation("androidx.concurrent:concurrent-futures:1.3.0")
     implementation("com.google.guava:guava:32.0.1-jre")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3")
+
+    testImplementation("junit:junit:4.13.2")
 }

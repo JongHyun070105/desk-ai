@@ -6,6 +6,8 @@ import android.content.Context
 import android.app.RemoteInput
 import com.jonghyun.autome.ai.AICoreManager
 import com.jonghyun.autome.services.ReplyActionStore
+import com.jonghyun.autome.services.DaechungAccessibilityService
+import com.jonghyun.autome.services.DaechungNotificationService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -18,7 +20,7 @@ import com.jonghyun.autome.data.MessageEntity
 import com.jonghyun.autome.utils.PiiMasker
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.jonghyun.autome/native"
+    private val CHANNEL = "com.jonghyun.daechung_talk/native"
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,7 +33,12 @@ class MainActivity : FlutterActivity() {
     }
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND) {
-            val uri = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+            val uri = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, android.net.Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+            }
             if (uri != null) {
                 processSharedFile(uri)
             }
@@ -68,7 +75,7 @@ class MainActivity : FlutterActivity() {
 
                 parseAndInsertChatLog(content, roomId, "나")
             } catch (e: Exception) {
-                android.util.Log.e("AutoMeCaptured", "Failed to process shared file: $e")
+                android.util.Log.e("DaeChungTok", "Failed to process shared file: $e")
             }
         }
     }
@@ -140,7 +147,7 @@ class MainActivity : FlutterActivity() {
                 "setGeminiApiKey" -> {
                     val apiKey = call.argument<String>("apiKey")
                     if (apiKey != null) {
-                        getSharedPreferences("autome_prefs", Context.MODE_PRIVATE).edit().putString("gemini_api_key", apiKey).apply()
+                        getSharedPreferences("daechung_talk_prefs", Context.MODE_PRIVATE).edit().putString("gemini_api_key", apiKey).apply()
                         result.success(true)
                     } else result.error("INVALID_ARGUMENT", "apiKey is required", null)
                 }
@@ -151,6 +158,34 @@ class MainActivity : FlutterActivity() {
                 "openNotificationSettings" -> {
                     startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     result.success(null)
+                }
+                "isIgnoringBatteryOptimizations" -> {
+                    val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                    result.success(pm.isIgnoringBatteryOptimizations(packageName))
+                }
+                "requestIgnoreBatteryOptimizations" -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        try {
+                            val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = android.net.Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("SETTING_ERROR", e.message, null)
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "getUsageStatsPermission" -> {
+                    val appOps = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+                    val mode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        appOps.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+                    } else {
+                        appOps.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
+                    }
+                    result.success(mode == android.app.AppOpsManager.MODE_ALLOWED)
                 }
                 "extractSenders" -> {
                     val filePath = call.argument<String>("filePath")
@@ -187,6 +222,17 @@ class MainActivity : FlutterActivity() {
                                 val roomName = roomNameArg ?: extractRoomNameFromHeader(content.lines().firstOrNull())
                                 val roomId = roomName
                                 parseAndInsertChatLog(content, roomId, meSenderName)
+                                
+                                // 파일 업로드로 등록한 채팅방은 자동으로 '자동 답장 활성화' 처리
+                                val db = AppDatabase.getDatabase(applicationContext)
+                                if (db.roomRuleDao().getRuleForRoom(roomId) == null) {
+                                    db.roomRuleDao().insertRule(com.jonghyun.autome.data.RoomRuleEntity(
+                                        roomId = roomId,
+                                        rule = "자연스럽게 대화하고, 별도의 규칙은 없습니다.",
+                                        isAutoReplyEnabled = true
+                                    ))
+                                }
+                                
                                 withContext(Dispatchers.Main) {
                                     result.success(true)
                                 }
@@ -229,12 +275,17 @@ class MainActivity : FlutterActivity() {
                     result.success(mapOf(
                         "accessibility" to isAccessibilityServiceEnabled(),
                         "notification" to isNotificationListenerServiceEnabled(),
-                        "overlay" to android.provider.Settings.canDrawOverlays(applicationContext)
+                        "overlay" to android.provider.Settings.canDrawOverlays(applicationContext),
+                        "calendar" to (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED)
                     ))
                 }
                 "openOverlaySettings" -> {
                     startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
                     result.success(null)
+                }
+                "requestCalendarPermission" -> {
+                    androidx.core.app.ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.READ_CALENDAR), 1001)
+                    result.success(true)
                 }
                 "getMessageCount" -> {
                     CoroutineScope(Dispatchers.IO).launch {
@@ -272,9 +323,12 @@ class MainActivity : FlutterActivity() {
                 "saveRoomRule" -> {
                     val rid = call.argument<String>("roomId")
                     val rule = call.argument<String>("rule")
+                    val enabled = call.argument<Boolean>("isAutoReplyEnabled") ?: true
                     if (rid != null && rule != null) {
                         CoroutineScope(Dispatchers.IO).launch {
-                            AppDatabase.getDatabase(applicationContext).roomRuleDao().insertRule(com.jonghyun.autome.data.RoomRuleEntity(rid, rule))
+                            AppDatabase.getDatabase(applicationContext).roomRuleDao().insertRule(
+                                com.jonghyun.autome.data.RoomRuleEntity(rid, rule, enabled)
+                            )
                             launch(Dispatchers.Main) { result.success(true) }
                         }
                     } else result.error("INVALID_ARGUMENT", "args required", null)
@@ -284,7 +338,17 @@ class MainActivity : FlutterActivity() {
                     if (rid != null) {
                         CoroutineScope(Dispatchers.IO).launch {
                             val r = AppDatabase.getDatabase(applicationContext).roomRuleDao().getRuleForRoom(rid)
-                            launch(Dispatchers.Main) { result.success(r) }
+                            launch(Dispatchers.Main) { 
+                                if (r != null) {
+                                    result.success(mapOf(
+                                        "roomId" to r.roomId,
+                                        "rule" to r.rule,
+                                        "isAutoReplyEnabled" to r.isAutoReplyEnabled
+                                    ))
+                                } else {
+                                    result.success(null)
+                                }
+                            }
                         }
                     } else result.error("INVALID_ARGUMENT", "roomId required", null)
                 }
@@ -342,7 +406,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
-        val expected = "$packageName/${com.jonghyun.autome.services.AutoMeAccessibilityService::class.java.canonicalName}"
+        val expected = "$packageName/${DaechungAccessibilityService::class.java.canonicalName}"
         val enabled = android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
         return enabled?.contains(expected) == true
     }

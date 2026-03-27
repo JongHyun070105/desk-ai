@@ -1,5 +1,5 @@
-name: auto_me
-description: "Auto-Me: On-Device AI based messaging learning model."
+name: daechung_talk
+description: "대충톡: 온디바이스 AI 기반 답장 어시스턴트"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

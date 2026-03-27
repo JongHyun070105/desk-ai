@@ -83,40 +83,81 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _showRuleDialog() async {
-    final currentRule = await NativeBridge.getRoomRule(widget.roomId);
+    final roomInfo = await NativeBridge.getRoomRule(widget.roomId);
     if (!mounted) return;
+
+    final currentRule = roomInfo?['rule'] as String?;
+    bool isAutoReplyEnabled = roomInfo?['isAutoReplyEnabled'] as bool? ?? true;
 
     final TextEditingController ruleController = TextEditingController(text: currentRule ?? '');
     
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('AI 답변 규칙 설정'),
-          content: TextField(
-            controller: ruleController,
-            decoration: const InputDecoration(
-              hintText: '예: 직장 상사에게는 무조건 존댓말',
-            ),
-            maxLines: 2,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('취소'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                await NativeBridge.saveRoomRule(widget.roomId, ruleController.text.trim());
-                if (context.mounted) Navigator.pop(context);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('채팅방 설정'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    title: const Text('AI 자동 답장 활성화'),
+                    subtitle: const Text('이 채팅방에 AI가 답장을 제안합니다.'),
+                    value: isAutoReplyEnabled,
+                    activeColor: AppColors.primary,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (val) {
+                      setDialogState(() => isAutoReplyEnabled = val);
+                    },
+                  ),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('AI 답변 규칙', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: ruleController,
+                    decoration: InputDecoration(
+                      hintText: '예: 자연스럽게 대화해줘',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Theme.of(context).brightness == Brightness.dark 
+                          ? Colors.white.withValues(alpha: 0.05) 
+                          : Colors.black.withValues(alpha: 0.05),
+                    ),
+                    maxLines: 3,
+                  ),
+                ],
               ),
-              child: const Text('저장'),
-            ),
-          ],
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('취소'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    await NativeBridge.saveRoomRule(
+                      widget.roomId, 
+                      ruleController.text.trim(),
+                      isAutoReplyEnabled: isAutoReplyEnabled,
+                    );
+                    if (context.mounted) Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('저장'),
+                ),
+              ],
+            );
+          }
         );
       },
     );

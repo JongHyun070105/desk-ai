@@ -1,5 +1,5 @@
+import 'package:daechung_talk/core/utils/chat_log_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:auto_me/core/utils/chat_log_parser.dart';
 
 void main() {
   group('ChatLogParser 테스트', () {

@@ -12,9 +12,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-class AutoMeAccessibilityService : AccessibilityService() {
+class DaechungAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(Dispatchers.IO)
-    private val TAG = "AutoMeAccessibility"
+    private val TAG = "DaeChungTok"
 
     private var currentRoomCandidate: String = "알 수 없는 방"
     private var lastWindowPackage: String = ""

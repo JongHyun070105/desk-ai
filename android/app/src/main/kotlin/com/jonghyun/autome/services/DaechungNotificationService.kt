@@ -11,14 +11,15 @@ import androidx.core.app.NotificationCompat
 import com.jonghyun.autome.ai.AICoreManager
 import com.jonghyun.autome.data.AppDatabase
 import com.jonghyun.autome.data.MessageEntity
+import com.jonghyun.autome.data.RoomRuleEntity
 import com.jonghyun.autome.utils.PiiMasker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-class AutoMeNotificationListenerService : NotificationListenerService() {
+class DaechungNotificationService : NotificationListenerService() {
     private val scope = CoroutineScope(Dispatchers.IO)
-    private val TAG = "AutoMeCaptured"
+    private val TAG = "DaeChungTok"
 
     // 지원 패키지: 카카오톡, 구글 메시지, 삼성 메시지, 기본 SMS (사용자 요청 반영)
     private val SUPPORTED_PACKAGES = setOf(
@@ -75,7 +76,7 @@ class AutoMeNotificationListenerService : NotificationListenerService() {
         }
 
         // 3. 제목이나 내용에 시스템성 문구가 포함된 경우 제외
-        if (title == "Android 시스템" || title.contains("Auto-Me") || 
+        if (title == "Android 시스템" || title.contains("대충톡") || 
             text.contains("running in the background") || text.contains("일기예보")) {
             return
         }
@@ -152,10 +153,16 @@ class AutoMeNotificationListenerService : NotificationListenerService() {
         scope.launch {
             try {
                 val db = AppDatabase.getDatabase(applicationContext)
-                val rule = db.roomRuleDao().getRuleForRoom(roomId)
+                val ruleEntity: RoomRuleEntity? = db.roomRuleDao().getRuleForRoom(roomId)
+
+                // 4. 필터링: 자동 답장이 활성화된(등록된) 채팅방만 플로팅 UI 표시
+                if (ruleEntity == null || !ruleEntity.isAutoReplyEnabled) {
+                    Log.d(TAG, "Auto-reply not enabled for $roomId, skipping floating UI (Rule: $ruleEntity)")
+                    return@launch
+                }
 
                 val aiManager = AICoreManager(applicationContext)
-                val replies = aiManager.generateReplyFromDb(roomId, roomRule = rule)
+                val replies = aiManager.generateReplyFromDb(roomId, roomRule = ruleEntity)
                 aiManager.close()
                 if (replies.size >= 3) {
                     val intent = FloatingReplyService.createIntent(
@@ -172,7 +179,7 @@ class AutoMeNotificationListenerService : NotificationListenerService() {
                     } else {
                         applicationContext.startService(intent)
                     }
-                    Log.d(TAG, "FloatingReplyService started for: $sender (roomId=$roomId) with rule: ${rule ?: "none"}")
+                    Log.d(TAG, "FloatingReplyService started for: $sender (roomId=$roomId) with rule: ${ruleEntity?.rule ?: "none"}")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to show floating reply: $e")

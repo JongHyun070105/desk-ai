@@ -11,7 +11,7 @@ class TxtImportScreen extends StatefulWidget {
 }
 
 class _TxtImportScreenState extends State<TxtImportScreen> {
-  static const MethodChannel _channel = MethodChannel('com.jonghyun.autome/native');
+  static const MethodChannel _channel = MethodChannel('com.jonghyun.daechung_talk/native');
   bool _isLoading = false;
 
   Future<void> _pickAndProcessFile() async {

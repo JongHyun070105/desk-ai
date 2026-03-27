@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.jonghyun.autome.data.AppDatabase
 import com.jonghyun.autome.data.MessageEntity
+import com.jonghyun.autome.data.RoomRuleEntity
 import com.jonghyun.autome.utils.PiiMasker
 import com.google.mlkit.genai.common.DownloadStatus
 import com.google.mlkit.genai.prompt.GenerativeModel as NanoModel
@@ -23,8 +24,8 @@ import java.util.Properties
  */
 class AICoreManager(private val context: Context) {
     companion object {
-        private const val TAG = "AICoreManager"
-        private const val DEFAULT_CONTEXT_SIZE = 50 // RAG 성능 향상을 위해 50개로 확대
+        private const val TAG = "DaeChungTok"
+        private const val DEFAULT_CONTEXT_SIZE = 15 // 맥락 유지 및 환각 방지를 위해 15-20개 유지
     }
 
     // Nano (On-Device) 모델
@@ -33,6 +34,7 @@ class AICoreManager(private val context: Context) {
     // Cloud 모델
     private var cloudModel: CloudModel? = null
     private var _apiKey: String? = null
+    private val calendarProvider = com.jonghyun.autome.data.CalendarProvider(context)
 
     init {
         _apiKey = getApiKeyFromProperties()
@@ -50,7 +52,7 @@ class AICoreManager(private val context: Context) {
      */
     private fun getApiKeyFromProperties(): String? {
         return try {
-            val prefs = context.getSharedPreferences("autome_prefs", Context.MODE_PRIVATE)
+            val prefs = context.getSharedPreferences("daechung_talk_prefs", Context.MODE_PRIVATE)
             prefs.getString("gemini_api_key", null)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to read API Key from SharedPreferences: $e")
@@ -106,7 +108,11 @@ class AICoreManager(private val context: Context) {
     /**
      * 특정 채팅방의 최근 메시지 컨텍스트를 기반으로 3가지 페르소나의 답변을 생성합니다.
      */
-    suspend fun generateReplyFromDb(roomId: String, roomRule: String? = null, contextSize: Int = DEFAULT_CONTEXT_SIZE): List<String> {
+    suspend fun generateReplyFromDb(
+        roomId: String,
+        contextSize: Int = DEFAULT_CONTEXT_SIZE,
+        roomRule: RoomRuleEntity? = null
+    ): List<String> {
         return withContext(Dispatchers.IO) {
             val db = AppDatabase.getDatabase(context)
             val recentMessages = db.messageDao().getRecentMessages(roomId, contextSize)
@@ -117,7 +123,8 @@ class AICoreManager(private val context: Context) {
             }
             val contextStrings = recentMessages.reversed().map { msg ->
                 val role = if (msg.isSentByMe) "나" else msg.sender
-                "$role: ${msg.message}"
+                val truncatedMessage = if (msg.message.length > 500) msg.message.take(500) + "..." else msg.message
+                "$role: $truncatedMessage"
             }
             
             // RAG 작동 확인용 로그
@@ -133,49 +140,44 @@ class AICoreManager(private val context: Context) {
     /**
      * 메시지 컨텍스트 리스트를 받아 문맥에 최적화된 3가지 답변을 한 번에 생성합니다.
      */
-    suspend fun generateReply(messageContext: List<String>, roomRule: String? = null): List<String> {
-        Log.d(TAG, "Generating 3 intelligent replies based on context. length: ${messageContext.size}")
+    suspend fun generateReply(messageContext: List<String>, roomRule: RoomRuleEntity? = null): List<String> {
+        val history = if (messageContext.size > 1) messageContext.dropLast(1).joinToString("\n") else "(대화 시작 단계)"
+        val targetMessage = messageContext.lastOrNull() ?: ""
 
-        val contextBlock = messageContext.joinToString("\n")
-        val prompt = buildSingleCallPrompt(contextBlock, roomRule)
+        var replies = emptyList<String>()
+        var retryCount = 0
+        val maxRetries = 2
 
-        val rawResponse = try {
-            // 1. 먼저 Nano (On-Device) 시도
-            generateWithMLKit(prompt)
-        } catch (e: Exception) {
-            Log.w(TAG, "Nano inference failed, trying Cloud fallback: $e")
-            
-            // 2. 실패 시 Cloud 시도
-            try {
-                generateWithCloud(prompt)
-            } catch (ce: Exception) {
-                Log.e(TAG, "Cloud inference also failed: $ce")
-                null
+        // 1. 대화 분위기 분류 (1단계)
+        val atmosphere = classifyAtmosphere(history, targetMessage)
+        val finalPrompt = buildSingleCallPrompt(history, targetMessage, roomRule?.rule, atmosphere)
+
+        while (retryCount < maxRetries) {
+            val rawResponse = try {
+                // 2. Nano 또는 Cloud로 답변 생성 (2단계)
+                generateWithMLKit(finalPrompt)
+            } catch (e: Exception) {
+                Log.w(TAG, "Nano inference failed, trying Cloud fallback: $e")
+                try {
+                    generateWithCloud(finalPrompt)
+                } catch (ce: Exception) {
+                    Log.e(TAG, "Cloud inference also failed: $ce")
+                    null
+                }
             }
+
+            if (rawResponse != null) {
+                replies = parseMultiReply(rawResponse)
+                if (replies.size >= 3) break
+            }
+            retryCount++
         }
 
-        // 3. 응답 파싱 및 정제
-        val replies = if (rawResponse != null) {
-            parseMultiReply(rawResponse)
-        } else {
-            getDefaultReplies()
-        }
-
-        return replies.map { PiiMasker.maskText(it) }
-    }
-
-    /**
-     * AI가 한 번에 생성한 3개의 답변을 분리합니다.
-     */
-    private fun parseMultiReply(raw: String): List<String> {
-        val lines = raw.lines()
-            .map { it.trim().replace(Regex("^([\\d\\-\\*\\.]+\\s*)"), "") }
-            .filter { it.isNotBlank() && it.length > 1 }
-        
-        return if (lines.size >= 3) {
-            lines.take(3)
-        } else if (lines.isNotEmpty()) {
-            val result = lines.toMutableList()
+        // 4. 최종 정제 및 Fallback
+        val finalReplies = if (replies.size >= 3) {
+            replies.take(3)
+        } else if (replies.isNotEmpty()) {
+            val result = replies.toMutableList()
             while (result.size < 3) {
                 result.add(result.last())
             }
@@ -183,42 +185,119 @@ class AICoreManager(private val context: Context) {
         } else {
             getDefaultReplies()
         }
+
+        return finalReplies.map { PiiMasker.maskText(it) }
+    }
+
+    /**
+     * AI가 한 번에 생성한 복수의 답변을 분리합니다.
+     */
+    private fun parseMultiReply(raw: String): List<String> {
+        return raw.lines()
+            .map { it.trim().replace(Regex("^([\\d\\-\\*\\.]+\\s*)"), "") }
+            .filter { it.isNotBlank() && it.length > 1 }
+    }
+
+    /**
+     * 대화의 분위기를 '진지', '일상', '장난' 중 하나로 분류합니다.
+     */
+    private suspend fun classifyAtmosphere(history: String, targetMessage: String): String {
+        val classificationPrompt = """
+            |다음 대화 이력과 마지막 메시지를 보고 현재 대화의 분위기를 단 한 단어로 분류하세요: [진지, 일상, 장난]
+            |
+            |[대화 이력]
+            |$history
+            |
+            |[마지막 메시지]
+            |$targetMessage
+            |
+            |결과는 오직 '진지', '일상', '장난' 중 하나로만 대답하세요.
+        """.trimMargin()
+
+        return try {
+            val result = if (cloudModel != null) {
+                generateWithCloud(classificationPrompt)
+            } else {
+                generateWithMLKit(classificationPrompt)
+            }
+            val cleaned = result.trim()
+            if (cleaned in listOf("진지", "일상", "장난")) {
+                Log.d(TAG, "[Classifier] Detected atmosphere: $cleaned")
+                cleaned
+            } else {
+                "일상"
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Atmosphere classification failed: $e. Falling back to '일상'")
+            "일상"
+        }
     }
 
     /**
      * 지능형 단일 호출용 프롬프트를 빌드합니다.
      */
-    private fun buildSingleCallPrompt(contextBlock: String, roomRule: String?): String {
+    private fun buildSingleCallPrompt(history: String, targetMessage: String, roomRule: String?, atmosphere: String = "일상"): String {
+        val calendarSummary = calendarProvider.getTodayEventsSummary()
+        android.util.Log.d("DaeChungTok", "[RAG] Calendar Summary: $calendarSummary")
+        
+        val atmosphereInstruction = when (atmosphere) {
+            "진지" -> "현재 대화는 매우 진지하거나 감정적인 상태입니다. 예의 바르고 공감하며, 가벼운 농담은 절대 삼가세요."
+            "장난" -> "현재 대화는 매우 유쾌하고 장난스러운 상태입니다. 재치 있고 위트 넘치는 답변을 작성하세요."
+            else -> "현재 대화는 평범한 일상 대화입니다. 자연스럽고 편안한 말투를 사용하세요."
+        }
+
         val ruleInstruction = if (!roomRule.isNullOrBlank()) {
-            "\n[특별 규칙: \"$roomRule\"]\n"
+            "\n[채팅방 특별 규칙: \"$roomRule\" — 이 규칙을 답변 전체에 자연스럽게 반영하세요.]\n"
         } else {
             ""
         }
 
         return """
-            |당신은 사용자의 원활한 채팅을 도와주는 똑똑한 AI 비서입니다.
-            |다음은 최근 대화 내역입니다 (가장 하단이 마지막 메시지입니다):
-            |---
-            |$contextBlock
-            |---
+            |당신은 사용자의 카카오톡 답장을 대신 작성해주는 AI입니다.
+            |사용자는 '나:'로 표시되고, 대화 상대방은 각자의 이름(예: '주시우:', '철수:')으로 표시됩니다.
             |
-            |**미션**: 위 대화 내역의 흐름을 반영하여 가장 마지막 메시지에 대한 자연스러운 답변 3가지를 생성하세요.
-            |**핵심 원칙**:
-            |1. **최신 메시지 최우선**: 가장 마지막 메시지의 질문이나 내용에 직접적인 답장을 생성하는 것이 기본입니다.
-            |2. **배경지식의 자연스러운 활용**: 이전 대화에서 나온 중요한 정보(좋아하는 노래, 음식, 취향, 별명, 이전 약속 등)가 있다면 이를 답변에 **자연스럽게 녹여내세요**. (예: 영화 약속을 정할 때, "아 아까 좋아한다고 했던 거북이 노래 같은 음악 영화 볼래?" 처럼 맥락을 이어가는 식)
-            |3. **대화의 연속성**: 단순히 기계적인 답변이 아니라, 이전 대화를 기억하고 있다는 느낌을 주어 사용자가 친밀감을 느끼게 하세요. 
-            |4. **주객전도 금지**: 하지만 현재 주제와 너무 동떨어진 옛날 이야기를 뜬금없이 꺼내지는 마세요. 흐름이 끊기지 않는 선에서만 배경지식을 활용하세요.
-            |5. **다양한 페르소나**: 상황에 맞춰 '적극적인 공감', '재치 있는 질문', '간결하고 명확한 대답' 등 3가지 답변이 서로 다른 뉘앙스를 가지게 하세요.
+            |[분위기 파악]
+            |$atmosphereInstruction
+            |
+            |[사용자의 일정 (전후 1개월)]
+            |$calendarSummary
+            |
+            |[최근 대화 이력]
+            |$history
+            |
+            |[지금 답해야 할 상대방의 메시지]
+            |$targetMessage
+            |
+            |[RAG 데이터 활용 지침]
+            |- 당신은 방금 DB에서 추출된 [최근 대화 이력]을 실시간으로 분석하여 문맥에 맞는 답변을 생성 중입니다. (RAG 기반 답변 생성)
+            |- 반드시 이력의 흐름(대화 주제, 뉘앙스)을 파악하여 '나'의 입장에서 보낼 수 있는 답장 3가지를 작성하세요.
+            |- 답변 1: 상대의 말에 공감하거나 자연스럽게 이어가는 답장
+            |- 답변 2: 대화를 이어가기 위해 가볍게 되묻거나 구체적인 내용을 확인하는 답장
+            |- 답변 3: 짧고 위트 있는 리액션 (단, 상황이 진지하거나 감정적인 맥락이면 이 답변도 진지하게 작성)
+            |각 답장은 서로 다른 방향성을 가져야 합니다.
             |$ruleInstruction
             |
-            |출력 형식:
-            |1. [답변 1]
-            |2. [답변 2]
-            |3. [답변 3]
+            |[반드시 지킬 것]
+            |- 당신은 절대로 AI, 챗봇, 또는 Gemini가 아닙니다. 당신은 오직 이 카톡 계정의 주인인 '사람'입니다.
+            |- "너 AI야?", "너 제미나이지?" 같은 질문을 받으면 "무슨 소리야 ㅋㅋ", "나 누구일 거 같아?", "갑자기 왜 이래?" 처럼 자연스럽게 넘기거나 본인임을 강조하세요.
+            |- 이력에 없는 정보는 절대 추측하거나 지어내지 마세요.
+            |- 대화 이력이 불명확하거나 맥락이 끊겨 있으면, 현재 메시지에만 집중해서 답변하세요.
+            |- 상대방의 말투(반말/존댓말)를 그대로 따라가세요.
+            |- 답변은 실제 카톡에서 보낼 수 있는 자연스러운 말투로, 한두 문장 이내로 작성하세요.
+            |- 번호와 답변 문장만 출력하고, 따옴표나 괄호 설명은 넣지 마세요.
             |
-            |제약 사항:
-            |1. 한국어로만 답변하고, 상대방의 말투(반말/존댓말)를 정확히 따르세요.
-            |2. 따옴표나 부연 설명 없이 번호와 답변 문장만 출력하세요.
+            |[답변 예시]
+            |상황: 친구와 점심 메뉴 이야기
+            |이력: 철수: 오늘 점심 뭐 먹음? / 나: 파스타 먹음 ㅎㅎ
+            |지금 답해야 할 상대방의 메시지: 철수: 오 나도 크림파스타 먹었는데 ㅋㅋ
+            |1. 오 ㅋㅋㅋ 통했네! 어디서 먹었어?
+            |2. 헐 진짜? 파스타는 못 참지 ㅋㅋ
+            |3. 파스타 브라더스 결성 ㄱㄱ
+            |
+            |출력 형식:
+            |1. [답변1]
+            |2. [답변2]
+            |3. [답변3]
         """.trimMargin()
     }
 
